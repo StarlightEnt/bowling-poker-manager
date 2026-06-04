@@ -35,6 +35,7 @@ export default function RootLayout({ children }) {
               { label: 'Dashboard', href: '/' },
               { label: 'Check-In', href: '/checkin' },
               { label: 'Game Night', href: '/gamenight' },
+              { label: 'Report', href: '/report' },
               { label: 'Schedule', href: '/schedule' },
               { label: 'History', href: '/history' },
               { label: 'Settings', href: '/settings' },
@@ -58,4 +59,3 @@ export default function RootLayout({ children }) {
     </html>
   );
 }
-
