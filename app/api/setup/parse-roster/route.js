@@ -1,0 +1,27 @@
+// PATH: app/api/setup/parse-roster/route.js
+import { NextResponse } from 'next/server';
+import { parseRosterPDF } from '@/lib/pdfParser';
+
+export async function POST(request) {
+  try {
+    const formData = await request.formData();
+    const file = formData.get('pdf');
+    if (!file) {
+      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+    }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const pdfParse = require('pdf-parse/lib/pdf-parse.js');
+    const data = await pdfParse(buffer);
+    const text = data.text;
+    const result = parseRosterPDF(text);
+    if (!result.teams || result.teams.length === 0) {
+      return NextResponse.json({
+        error: 'Could not parse teams from PDF. Please make sure this is a League Standings PDF from BLS software.'
+      }, { status: 400 });
+    }
+    return NextResponse.json(result);
+  } catch (err) {
+    console.error('Roster parse error:', err);
+    return NextResponse.json({ error: 'Failed to parse PDF: ' + err.message }, { status: 500 });
+  }
+}
