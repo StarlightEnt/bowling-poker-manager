@@ -53,13 +53,13 @@ export async function GET(request) {
 
     const playerCount = checkedIn.length;
     const pool = playerCount * buyinAmount;
-    const payoutTotal = Math.floor((pool - progressiveNightly) / 4) * 3;
-    const charityTotal = pool - progressiveNightly - payoutTotal;
+    const payoutTotal = playerCount === 0 ? 0 : Math.floor((pool - progressiveNightly) / 4) * 3;
+    const charityTotal = playerCount === 0 ? 0 : pool - progressiveNightly - payoutTotal;
     const perGame = {
-      pool: pool / 3,
-      progressive: progressiveNightly / 3,
-      payout: payoutTotal / 3,
-      charity: charityTotal / 3,
+      pool:        playerCount === 0 ? 0 : pool / 3,
+      progressive: playerCount === 0 ? 0 : progressiveNightly / 3,
+      payout:      playerCount === 0 ? 0 : payoutTotal / 3,
+      charity:     playerCount === 0 ? 0 : charityTotal / 3,
     };
 
     const lockRows = await sql`SELECT id FROM progressive_pot WHERE season_id = ${season.id} AND week_number = ${week} AND transaction_type = 'lock'`;

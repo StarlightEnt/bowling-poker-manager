@@ -1,33 +1,35 @@
 // PATH: app/api/dashboard/route.js
 import sql from '@/lib/db';
 
-function getWeekCandidates() {
+async function detectWeek(seasonId) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const candidates = [];
-  if (today.getDay() === 3) candidates.push(new Date(today));
-  for (let i = 0; i <= 2; i++) {
-    const d = new Date(today);
-    const daysUntilWed = (3 - d.getDay() + 7) % 7 || 7;
-    d.setDate(d.getDate() + daysUntilWed + i * 7);
-    candidates.push(d);
-  }
-  return candidates;
-}
+  const todayStr = today.toISOString().split('T')[0];
 
-async function detectWeek(seasonId) {
-  for (const candidate of getWeekCandidates()) {
-    const dateStr = candidate.toISOString().split('T')[0];
-    const rows = await sql`
+  // 1. If today is a bowling day (Wednesday), use today's week
+  if (today.getDay() === 3) {
+    const [todayRow] = await sql`
       SELECT week_number FROM schedule
-      WHERE season_id = ${seasonId} AND bowl_date = ${dateStr}
+      WHERE season_id = ${seasonId} AND bowl_date = ${todayStr}
     `;
-    if (rows.length > 0) return rows[0].week_number;
+    if (todayRow) return todayRow.week_number;
   }
+
+  // 2. Look backward — find the most recently completed or locked week
+  const [lastWeek] = await sql`
+    SELECT week_number FROM schedule
+    WHERE season_id = ${seasonId}
+      AND bowl_date < ${todayStr}
+      AND is_position_round = false
+    ORDER BY bowl_date DESC LIMIT 1
+  `;
+  if (lastWeek) return lastWeek.week_number;
+
+  // 3. No past weeks — fall forward to next upcoming week
   const [upcoming] = await sql`
     SELECT week_number FROM schedule
     WHERE season_id = ${seasonId}
-      AND bowl_date >= CURRENT_DATE
+      AND bowl_date >= ${todayStr}
       AND is_position_round = false
     ORDER BY bowl_date ASC LIMIT 1
   `;
@@ -90,42 +92,34 @@ export async function GET() {
     `;
     const totalBowlers = parseInt(bowlerRows[0]?.cnt ?? 0, 10);
 
-    const gameRows = await sql`
+    const gamesRow = await sql`
       SELECT COUNT(DISTINCT game_number) AS cnt
       FROM game_results
       WHERE season_id = ${sid} AND week_number = ${weekNum}
     `;
-    const gamesEntered = parseInt(gameRows[0]?.cnt ?? 0, 10);
+    const gamesEntered = parseInt(gamesRow[0]?.cnt ?? 0, 10);
 
-    const progRows = await sql`
+    const [progRow] = await sql`
       SELECT balance_after FROM progressive_pot
       WHERE season_id = ${sid}
       ORDER BY id DESC LIMIT 1
     `;
-    const progressivePot = parseFloat(progRows[0]?.balance_after ?? 0);
+    const progressivePot = progRow ? parseFloat(progRow.balance_after) : 0;
 
-    const charityRows = await sql`
+    const [charRow] = await sql`
       SELECT balance_after FROM charity_fund
       WHERE season_id = ${sid}
       ORDER BY id DESC LIMIT 1
     `;
-    const charityFund = parseFloat(charityRows[0]?.balance_after ?? 0);
+    const charityFund = charRow ? parseFloat(charRow.balance_after) : 0;
 
     const weeksComplete = schedRows.filter(w => w.status === 'complete').length;
-    const totalWeeks = schedRows.length;
+    const totalWeeks = schedRows.filter(w => !w.is_position_round).length;
 
     return Response.json({
-      season: {
-        id: sid,
-        name: season.name,
-        start_date: season.start_date,
-        end_date: season.end_date,
-      },
-      currentWeek: currentWeek ? {
-        week_number: currentWeek.week_number,
-        bowl_date: currentWeek.bowl_date,
-        status: currentWeek.status,
-      } : null,
+      season,
+      currentWeek,
+      schedule: schedRows,
       stats: {
         checkedIn,
         totalBowlers,
@@ -137,7 +131,7 @@ export async function GET() {
       },
     });
   } catch (err) {
-    console.error('GET /api/dashboard error:', err);
+    console.error('Dashboard GET error:', err);
     return Response.json({ error: err.message }, { status: 500 });
   }
 }

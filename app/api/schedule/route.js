@@ -1,34 +1,34 @@
+// PATH: app/api/schedule/route.js
 import { neon } from '@neondatabase/serverless';
 
 const sql = neon(process.env.DATABASE_URL);
 
-function getWeekCandidates() {
+async function detectWeek(seasonId) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const candidates = [];
-  if (today.getDay() === 3) candidates.push(new Date(today));
-  for (let i = 0; i <= 2; i++) {
-    const d = new Date(today);
-    const daysUntilWed = (3 - d.getDay() + 7) % 7 || 7;
-    d.setDate(d.getDate() + daysUntilWed + i * 7);
-    candidates.push(d);
-  }
-  return candidates;
-}
+  const todayStr = today.toISOString().split('T')[0];
 
-async function detectWeek(seasonId) {
-  for (const candidate of getWeekCandidates()) {
-    const dateStr = candidate.toISOString().split('T')[0];
-    const rows = await sql`
+  if (today.getDay() === 3) {
+    const [todayRow] = await sql`
       SELECT week_number FROM schedule
-      WHERE season_id = ${seasonId} AND bowl_date = ${dateStr}
+      WHERE season_id = ${seasonId} AND bowl_date = ${todayStr}
     `;
-    if (rows.length > 0) return rows[0].week_number;
+    if (todayRow) return todayRow.week_number;
   }
+
+  const [lastWeek] = await sql`
+    SELECT week_number FROM schedule
+    WHERE season_id = ${seasonId}
+      AND bowl_date < ${todayStr}
+      AND is_position_round = false
+    ORDER BY bowl_date DESC LIMIT 1
+  `;
+  if (lastWeek) return lastWeek.week_number;
+
   const [upcoming] = await sql`
     SELECT week_number FROM schedule
     WHERE season_id = ${seasonId}
-      AND bowl_date >= CURRENT_DATE
+      AND bowl_date >= ${todayStr}
       AND is_position_round = false
     ORDER BY bowl_date ASC LIMIT 1
   `;
@@ -38,12 +38,13 @@ async function detectWeek(seasonId) {
 export async function GET() {
   try {
     const season = await sql`
-      SELECT id FROM seasons WHERE is_active = true LIMIT 1
+      SELECT id, name FROM seasons WHERE is_active = true LIMIT 1
     `;
     if (!season.length) {
       return Response.json({ error: 'No active season' }, { status: 404 });
     }
     const seasonId = season[0].id;
+    const seasonName = season[0].name;
 
     const currentWeekNumber = await detectWeek(seasonId);
 
@@ -75,7 +76,7 @@ export async function GET() {
       ORDER BY s.week_number ASC
     `;
 
-    return Response.json({ weeks: rows, seasonId, currentWeekNumber });
+    return Response.json({ weeks: rows, seasonId, seasonName, currentWeekNumber });
   } catch (err) {
     console.error('GET /api/schedule error:', err);
     return Response.json({ error: err.message }, { status: 500 });

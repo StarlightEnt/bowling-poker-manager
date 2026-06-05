@@ -1,14 +1,16 @@
+// PATH: app/schedule/page.js
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
 
 export default function SchedulePage() {
-  const [weeks, setWeeks]       = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState(null);
-  const [editing, setEditing]         = useState({});
-  const [saving, setSaving]           = useState({});
+  const [weeks, setWeeks]                   = useState([]);
+  const [loading, setLoading]               = useState(true);
+  const [error, setError]                   = useState(null);
+  const [editing, setEditing]               = useState({});
+  const [saving, setSaving]                 = useState({});
   const [currentWeekNum, setCurrentWeekNum] = useState(null);
+  const [seasonName, setSeasonName]         = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -19,6 +21,7 @@ export default function SchedulePage() {
       if (!res.ok) throw new Error(data.error || 'Failed to load schedule');
       setWeeks(data.weeks);
       setCurrentWeekNum(data.currentWeekNumber);
+      setSeasonName(data.seasonName || '');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -28,7 +31,6 @@ export default function SchedulePage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Use date-based week detection from API (same formula as check-in screen)
   const currentWeek = weeks.find(w => w.week_number === currentWeekNum)
     || weeks.find(w => w.status === 'upcoming');
 
@@ -39,8 +41,8 @@ export default function SchedulePage() {
     setEditing(prev => ({
       ...prev,
       [week.id]: {
-        starting_lane:    week.starting_lane ?? 1,
-        lane_positions:   week.lane_positions ? [...week.lane_positions] : Array(12).fill(null),
+        starting_lane:     week.starting_lane ?? 1,
+        lane_positions:    week.lane_positions ? [...week.lane_positions] : Array(12).fill(null),
         is_position_round: week.is_position_round ?? false,
       }
     }));
@@ -73,15 +75,14 @@ export default function SchedulePage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id:               week.id,
-          starting_lane:    parseInt(edits.starting_lane, 10) || 1,
-          lane_positions:   edits.lane_positions,
+          id:                week.id,
+          starting_lane:     parseInt(edits.starting_lane, 10) || 1,
+          lane_positions:    edits.lane_positions,
           is_position_round: edits.is_position_round,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Save failed');
-      // Update local state
       setWeeks(prev => prev.map(w =>
         w.id === week.id
           ? { ...w, ...edits, starting_lane: parseInt(edits.starting_lane, 10) || 1 }
@@ -104,7 +105,6 @@ export default function SchedulePage() {
   function formatDate(dateStr) {
     if (!dateStr) return '—';
     const d = new Date(dateStr);
-    // Adjust for timezone offset so we get the right day
     const adjusted = new Date(d.getTime() + d.getTimezoneOffset() * 60000);
     return adjusted.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' });
   }
@@ -127,7 +127,6 @@ export default function SchedulePage() {
     </div>
   );
 
-  // Build POS header cells using current week's starting lane
   const posHeaders = Array.from({ length: numPositions }, (_, i) => ({
     pos: i + 1,
     lane: activeStartingLane + i,
@@ -149,7 +148,7 @@ export default function SchedulePage() {
         Schedule
       </h1>
       <p style={{ color: '#555', fontSize: 11, margin: '0 0 20px' }}>
-        Summer 2026 &nbsp;·&nbsp; {weeks.length} weeks &nbsp;·&nbsp; Classic Bowling Center, San Francisco
+        {seasonName} &nbsp;·&nbsp; {weeks.length} weeks &nbsp;·&nbsp; Classic Bowling Center, San Francisco
       </p>
 
       {/* Table */}
@@ -182,7 +181,6 @@ export default function SchedulePage() {
                   </span>
                 </th>
               ))}
-              {/* pencil column */}
               <th style={{ ...thCenter, width: 36 }} />
             </tr>
           </thead>
@@ -204,47 +202,27 @@ export default function SchedulePage() {
                     borderBottom: '1px solid #1a1a1e',
                     background: isEditing ? '#16161a' : isCurrent ? '#161a0e' : 'transparent',
                     borderLeft: isCurrent ? '3px solid #e8ff47' : '3px solid transparent',
-                    opacity: isComplete ? 0.65 : 1,
+                    opacity: isComplete ? 0.5 : 1,
                   }}
                 >
-                  {/* WK + position round label */}
-                  <td style={{ ...tdLeft, paddingLeft: isCurrent ? 9 : 12 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      <span style={{
-                        display: 'inline-block',
-                        background: isCurrent ? '#2a2f18' : '#1e1e22',
-                        color: isCurrent ? '#e8ff47' : '#666',
-                        fontSize: 10,
-                        padding: '2px 6px',
-                        borderRadius: 3,
-                        width: 'fit-content',
-                        letterSpacing: 1,
-                      }}>
-                        {String(week.week_number).padStart(2, '0')}
-                      </span>
-                      {week.is_position_round && (
-                        <span style={{ color: '#3dffa0', fontSize: 9, letterSpacing: 1, textTransform: 'uppercase' }}>
-                          Position round
-                        </span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Date */}
                   <td style={tdLeft}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
-                      <span style={{
-                        display: 'inline-block',
-                        width: 6, height: 6,
-                        borderRadius: '50%',
-                        background: statusColor(week.status),
-                        flexShrink: 0,
-                      }} />
-                      <span style={{ color: '#bbb', fontSize: 11 }}>{formatDate(week.bowl_date)}</span>
+                    <span style={{
+                      fontFamily: "'Bebas Neue', sans-serif",
+                      fontSize: 13,
+                      letterSpacing: 1,
+                      color: isCurrent ? '#e8ff47' : isComplete ? '#3dffa0' : '#777',
+                    }}>
+                      {String(week.week_number).padStart(2, '0')}
+                    </span>
+                    {week.is_position_round && (
+                      <span style={{ color: '#3dffa066', fontSize: 9, marginLeft: 4 }}>POS</span>
+                    )}
+                  </td>
+                  <td style={tdLeft}>
+                    <span style={{ color: isCurrent ? '#e8ff47' : '#555', fontSize: 11 }}>
+                      {formatDate(week.bowl_date)}
                     </span>
                   </td>
-
-                  {/* Starting lane */}
                   <td style={tdCenter}>
                     {isEditing ? (
                       <input
@@ -260,7 +238,6 @@ export default function SchedulePage() {
                     )}
                   </td>
 
-                  {/* POS cells */}
                   {Array.from({ length: numPositions }, (_, i) => {
                     const val = positions[i];
                     return (
@@ -287,24 +264,35 @@ export default function SchedulePage() {
                     );
                   })}
 
-                  {/* Action button */}
                   <td style={tdCenter}>
                     {isComplete ? (
                       <span style={{ color: '#2a2a2e', fontSize: 12 }} title="Complete — locked">🔒</span>
                     ) : isEditing ? (
-                      <button
-                        onClick={() => saveRow(week)}
-                        disabled={isSaving}
-                        title="Save changes"
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          color: isSaving ? '#555' : '#3dffa0',
-                          fontSize: 16, padding: '2px 5px', borderRadius: 3,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {isSaving ? '…' : '✓'}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => saveRow(week)}
+                          disabled={isSaving}
+                          title="Save changes"
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            color: isSaving ? '#555' : '#3dffa0',
+                            fontSize: 16, padding: '2px 5px', borderRadius: 3, lineHeight: 1,
+                          }}
+                        >
+                          {isSaving ? '…' : '✓'}
+                        </button>
+                        <button
+                          onClick={() => cancelEdit(week.id)}
+                          title="Cancel"
+                          style={{
+                            background: 'none', border: 'none', cursor: 'pointer',
+                            color: '#555', fontSize: 13, padding: '2px 5px',
+                            borderRadius: 3, lineHeight: 1,
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </>
                     ) : (
                       <button
                         onClick={() => startEdit(week)}
@@ -312,8 +300,7 @@ export default function SchedulePage() {
                         style={{
                           background: 'none', border: 'none', cursor: 'pointer',
                           color: '#333', fontSize: 13, padding: '2px 5px',
-                          borderRadius: 3, lineHeight: 1,
-                          transition: 'color 0.1s',
+                          borderRadius: 3, lineHeight: 1, transition: 'color 0.1s',
                         }}
                         onMouseEnter={e => e.currentTarget.style.color = '#aaa'}
                         onMouseLeave={e => e.currentTarget.style.color = '#333'}
@@ -350,51 +337,27 @@ export default function SchedulePage() {
   );
 }
 
-// Shared cell styles
 const thLeft = {
-  color: '#555',
-  fontSize: 10,
-  letterSpacing: 1,
-  textTransform: 'uppercase',
-  padding: '8px 12px',
-  textAlign: 'left',
-  fontWeight: 400,
-  whiteSpace: 'nowrap',
+  color: '#555', fontSize: 10, letterSpacing: 1,
+  textTransform: 'uppercase', padding: '8px 12px',
+  textAlign: 'left', fontWeight: 400, whiteSpace: 'nowrap',
 };
 const thCenter = {
-  ...thLeft,
-  textAlign: 'center',
-  padding: '8px 8px',
+  ...thLeft, textAlign: 'center', padding: '8px 8px',
 };
 const tdLeft = {
-  padding: '7px 12px',
-  verticalAlign: 'middle',
-  textAlign: 'left',
+  padding: '7px 12px', verticalAlign: 'middle', textAlign: 'left',
 };
 const tdCenter = {
-  padding: '7px 8px',
-  verticalAlign: 'middle',
-  textAlign: 'center',
+  padding: '7px 8px', verticalAlign: 'middle', textAlign: 'center',
 };
 const laneInputStyle = {
-  background: '#0d0d0f',
-  border: '1px solid #333',
-  color: '#e8ff47',
-  fontFamily: 'monospace',
-  fontSize: 11,
-  width: 38,
-  padding: '2px 4px',
-  borderRadius: 3,
-  textAlign: 'center',
+  background: '#0d0d0f', border: '1px solid #333',
+  color: '#e8ff47', fontFamily: 'monospace', fontSize: 11,
+  width: 38, padding: '2px 4px', borderRadius: 3, textAlign: 'center',
 };
 const posInputStyle = {
-  background: '#0d0d0f',
-  border: '1px solid #2a2a2e',
-  color: '#ccc',
-  fontFamily: 'monospace',
-  fontSize: 11,
-  width: 32,
-  padding: '2px 3px',
-  borderRadius: 3,
-  textAlign: 'center',
+  background: '#0d0d0f', border: '1px solid #2a2a2e',
+  color: '#ccc', fontFamily: 'monospace', fontSize: 11,
+  width: 32, padding: '2px 3px', borderRadius: 3, textAlign: 'center',
 };
