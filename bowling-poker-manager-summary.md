@@ -250,11 +250,11 @@ One week of real data (Week 7, Summer 2026) has been exported to JSON and saved 
 - `seasons.json`, `teams.json`, `bowlers.json`, `checkins.json`
 - `game_results.json`, `progressive_pot.json`, `charity_fund.json`
 
-After the schema refactor, this data must be reimported into the new structure. The mapping is:
+This data was successfully migrated into the new schema structure:
 - Old `bowlers` rows → new `bowlers` (league-wide) + `season_roster` (season-scoped)
 - Old `teams` rows → new `teams` (league-wide) + `season_teams` (season-scoped)
-- `checkins` and `game_results` `bowler_id` values must map to new permanent `bowlers.id`
-- Week 7 bowl_date needs to be corrected to `2026-06-04` (Wednesday June 4, 2026) — the stored date is wrong
+- `checkins` and `game_results` `bowler_id` values mapped to new permanent `bowlers.id`
+- Week 8 bowl_date corrected to `2026-06-10` (June 10, 2026)
 
 ---
 
@@ -381,7 +381,6 @@ bowling-poker-manager/
 - Past weeks selector
 - Win leaderboard (lifetime and per-season)
 - Full game log by season
-- Depends on stable bowler identity — requires schema refactor first
 
 ### Settings (`/settings`)
 - Buy-in amount
@@ -428,11 +427,14 @@ bowling-poker-manager/
 7. **Z- prefix REMOVED**: Subs no longer have Z- prefix. Live DB migrated with SUBSTRING query
 8. **imported_name**: Immutable identity key on bowlers. Set once at insert, never updated. Used for PDF re-import matching. DO NOT update this field in any edit operation
 9. **Season setup is destructive**: `/setup` is intentionally kept off the main nav. Will be accessed via Settings page (not yet built)
-10. **Schema refactor pending**: Do not add features that depend on the old season-scoped bowlers/teams structure until the refactor is complete
+10. **Schema refactor COMPLETE**: New permanent bowler/team identity model is live. All features can now be built on the stable schema.
 
 ---
 
-## Current DB State
+## Known Bugs
+- **Dashboard week detection**: When today is not a bowling day (Wednesday), the dashboard shows the next upcoming week instead of the most recently completed week. The auto-detect logic looks forward to the nearest Wednesday rather than backward to the last completed week. Needs a fix in `app/api/dashboard/route.js`.
+
+---
 - Schema refactor COMPLETE (June 5, 2026)
 - New schema live in Neon (season_id=1)
 - 12 permanent teams, 77 permanent bowlers (52 regular + 25 subs)
