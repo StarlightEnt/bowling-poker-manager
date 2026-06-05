@@ -41,8 +41,8 @@ export async function POST(request) {
       for (let i = 0; i < team.bowlers.length; i++) {
         const b = team.bowlers[i];
         await sql`
-          INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, is_sub, position_order, book_average)
-          VALUES (${savedTeam.id}, ${seasonId}, ${b.full_name}, ${b.normalized_name}, false, ${i + 1}, ${b.book_average || null})
+          INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, imported_name, is_sub, position_order, book_average)
+          VALUES (${savedTeam.id}, ${seasonId}, ${b.full_name}, ${b.normalized_name}, ${b.full_name}, false, ${i + 1}, ${b.book_average || null})
         `;
       }
     }
@@ -51,8 +51,8 @@ export async function POST(request) {
     for (let i = 0; i < subs.length; i++) {
       const s = subs[i];
       await sql`
-        INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, is_sub, position_order, book_average)
-        VALUES (null, ${seasonId}, ${s.full_name}, ${s.normalized_name}, true, ${i + 1}, ${s.book_average || null})
+        INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, imported_name, is_sub, position_order, book_average)
+        VALUES (null, ${seasonId}, ${s.full_name}, ${s.normalized_name}, ${s.full_name}, true, ${i + 1}, ${s.book_average || null})
       `;
     }
 
@@ -72,7 +72,6 @@ export async function POST(request) {
         // Build lane_positions: one entry per individual lane, left to right.
         // PDF gives pairs (9-3 = team 9 on one lane, team 3 on the next lane).
         // Flatten: [9, 3, 1, 10, ...] → 12 entries for 12 teams.
-        // Index N = team at lane (starting_lane + N).
         let lanePositions = null;
         if (!week.is_position_round && week.lane_pairs && week.lane_pairs.length > 0) {
           lanePositions = week.lane_pairs.flatMap(p => [p.home, p.away]);

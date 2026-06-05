@@ -33,12 +33,13 @@ export default function RootLayout({ children }) {
           <nav style={{ display: 'flex', gap: '4px' }}>
             {[
               { label: 'Dashboard', href: '/' },
-              { label: 'Check-In', href: '/checkin' },
+              { label: 'Check-In',  href: '/checkin' },
               { label: 'Game Night', href: '/gamenight' },
-              { label: 'Report', href: '/report' },
-              { label: 'Schedule', href: '/schedule' },
-              { label: 'History', href: '/history' },
-              { label: 'Settings', href: '/settings' },
+              { label: 'Report',    href: '/report' },
+              { label: 'Schedule',  href: '/schedule' },
+              { label: 'Roster',    href: '/roster' },
+              { label: 'History',   href: '/history' },
+              { label: 'Settings',  href: '/settings' },
             ].map(({ label, href }) => (
               <a key={href} href={href} style={{
                 color: 'var(--muted)',

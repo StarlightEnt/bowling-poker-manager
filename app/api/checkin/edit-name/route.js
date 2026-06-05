@@ -7,12 +7,7 @@ export async function POST(request) {
   try {
     const { bowlerId, fullName } = await request.json();
 
-    // Get existing bowler to check if sub (for Z- prefix)
-    const [bowler] = await sql`SELECT is_sub FROM bowlers WHERE id = ${bowlerId}`;
-    
-    // Derive normalized name from full name
-    let normalizedName = normalizeName(fullName);
-    if (bowler?.is_sub) normalizedName = 'Z-' + normalizedName;
+    const normalizedName = normalizeName(fullName);
 
     await sql`
       UPDATE bowlers 

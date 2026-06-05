@@ -1,8 +1,27 @@
 # Bowling Poker Manager — Project Summary
-*As of June 4, 2026*
+*As of June 5, 2026*
+
+## How We Work Together
+- Discuss and agree on approach BEFORE writing any code
+- **Present the plan/summary first — STOP and wait for explicit "go ahead" confirmation before writing any code**
+- Work one step at a time — wait for confirmation/acknowledgement before proceeding to the next file or step
+- Always deliver complete downloadable files — NEVER ask the user to make surgical edits
+- Always specify full file paths when providing files to update
+- Be clear about whether a file is NEW or a REPLACEMENT — never present ambiguous file deliveries
+- Remind me to restart the server or redeploy after any file changes
+- Be accurate — never claim something is done unless it is verified
+
+## Security Rules
+- NEVER suggest putting credentials, tokens, or secrets in chat or in git
+- `.env.local` is always created manually on each machine, never committed
+- If credentials are accidentally exposed, rotate them immediately in Neon console
+
+---
 
 ## Project Overview
 A web app replacing a manual Excel spreadsheet to manage a poker side-game during the LGBT Wednesday Community bowling league at Classic Bowling Center, San Francisco. Players pay $5 buy-in, draw cards for spares/strikes during 3 bowling games, and best 5-card poker hand wins each game.
+
+Built to be sold/licensed to other leagues — must be robust, multi-season, multi-league capable.
 
 ---
 
@@ -15,38 +34,227 @@ A web app replacing a manual Excel spreadsheet to manage a poker side-game durin
 - **Image Export**: `html-to-image`
 
 ## Dev Environments
-- **Home Windows**: `C:\Users\allis\DevProjects\bowling-poker-manager`
-- **Work Windows**: `D:\users\allis\DevProjects\bowling-poker-manager`
-- **Mac**: Has routing issues with Next.js API routes — defer to Windows for dev
+- **Home Windows**: `C:\Users\allis\DevProjects\bowling-poker-manager` — Node 24.16.0 ✅
+- **Work Windows**: `D:\users\allis\DevProjects\bowling-poker-manager` — Node 24.16.0 ✅
+- **Mac (M2)**: `/Users/alaureano/DevProjects/bowling-poker-manager` — Node 24.16.0 via nvm ✅
 - **Port**: 3005 (`next dev -p 3005`)
-- **Env file**: `.env.local` with `DATABASE_URL` (not in git)
+- **Env file**: `.env.local` with `DATABASE_URL` (gitignored, never committed, must be created manually on each machine)
+
+### Node Version Management
+- **Node version**: 24.16.0 (pinned via `.nvmrc`) — all three machines match
+- **Mac**: uses `nvm` — run `nvm use` in project folder to activate correct version
+- **Windows**: Node installed directly at 24.16.0
+- **To verify**: run `node --version` before starting dev — must show v24.16.0
+
+### Environment Setup (new machine checklist)
+1. Clone repo: `git clone https://github.com/StarlightEnt/bowling-poker-manager.git`
+2. Mac only: install nvm, run `nvm install 24`, `nvm use 24`
+3. `npm install`
+4. Create `.env.local` manually with `DATABASE_URL=<connection string from Neon console>`
+5. `npm run dev` → http://localhost:3005
 
 ## Database
-- **Connection**: `postgresql://neondb_owner:npg_UzFa7I1EKvsS@ep-curly-queen-api9oapp-pooler.c-7.us-east-1.aws.neon.tech/neondb?sslmode=require`
+- **Connection string**: Get from Neon console (console.neon.tech) → Connect button → Show password
 - **Branch**: production
-- **Active Season**: "Summer 2026" (season_id = 5)
+- **Active Season**: "Summer 2026" (season_id = 7 after refactor)
 
 ---
 
-## Database Schema
+## ⚠️ PENDING SCHEMA REFACTOR — MUST BE DONE BEFORE FURTHER DEVELOPMENT
 
-### Tables
-- **settings** — key/value config (buyin_amount=5, progressive_nightly=3, progressive_per_game=1)
-- **seasons** — id, name, start_date, end_date, is_active
-- **teams** — id, season_id, team_number, name
-- **bowlers** — id, season_id, team_id, full_name, normalized_name, is_sub, position_order, book_average
-- **schedule** — id, season_id, week_number, bowl_date, starting_lane, lane_positions (JSONB), is_position_round, notes
-- **checkins** — id, season_id, week_number, bowler_id, paid_amount, checked_in_at
-- **game_results** — id, season_id, week_number, game_number, bowler_id, hand_type, hand_detail, pot_amount, is_progressive_win, progressive_payout, total_payout
-- **progressive_pot** — id, season_id, week_number, transaction_type (lock/payout), amount, balance_after, notes
-- **charity_fund** — id, season_id, week_number, transaction_type (lock), amount, balance_after, notes
+### Background
+The current schema treats bowlers and teams as season-scoped entities — every new season deletes and recreates all bowler and team records. This is architecturally wrong for a multi-season league management tool:
 
-### Key Design Decisions
-- **lane_positions**: JSONB array of team_numbers, one per individual lane, left-to-right. Index N = team at lane (starting_lane + N). Open-ended — works for any number of teams.
-- **starting_lane**: configurable per week (was 5 for weeks 1-2 this season, then 1)
-- **VACANT**: stored as a real bowler row with normalized_name = 'VACANT'
-- **Subs**: Z- prefix on normalized_name for alphabetic sort to end of list
-- **Season replace**: saving same season name deletes and recreates all data (ON DELETE CASCADE)
+- Bowlers are real people who persist across seasons
+- Teams are real organizations that persist across seasons (though they may sit out a season)
+- Team numbers are re-seeded each season based on finish position — "Taste the Rainbow" may be Team 9 this season and Team 12 next season
+- All historical data (checkins, game results) must remain tied to stable, permanent bowler and team identities
+- The History screen (not yet built) depends entirely on this stable identity model
+
+### The Golden Rules (never violate)
+- **A bowler is a bowler is a bowler** — one DB row per person, forever, never deleted
+- **A team is a team is a team** — one DB row per organization, forever, never deleted
+- **VACANT rows have no transactional data** — safe to delete/replace when a real bowler fills the slot
+- **Never delete a bowler record that could have historical data**
+- **imported_name is the immutable identity key** — never modified after initial insert, used for PDF re-import matching
+
+### New Schema Design
+
+```sql
+-- League-wide identity tables (permanent, never season-scoped)
+
+-- Bowlers: one row per person, forever
+CREATE TABLE bowlers (
+  id             SERIAL PRIMARY KEY,
+  full_name      TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  imported_name  TEXT NOT NULL,        -- immutable original PDF name, identity key
+  email          TEXT,
+  created_at     TIMESTAMP DEFAULT NOW()
+);
+
+-- Teams: one row per organization, forever
+CREATE TABLE teams (
+  id    SERIAL PRIMARY KEY,
+  name  TEXT NOT NULL
+);
+
+-- Season tables (scoped to a season)
+
+CREATE TABLE seasons (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL,
+  start_date DATE,
+  end_date   DATE,
+  is_active  BOOLEAN DEFAULT false,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Season team membership: team participates in a season with a number
+CREATE TABLE season_teams (
+  id          SERIAL PRIMARY KEY,
+  season_id   INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+  team_id     INTEGER REFERENCES teams(id),
+  team_number INTEGER NOT NULL,
+  UNIQUE(season_id, team_id),
+  UNIQUE(season_id, team_number)
+);
+
+-- Season roster: bowler's membership for a specific season
+CREATE TABLE season_roster (
+  id             SERIAL PRIMARY KEY,
+  season_id      INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+  team_id        INTEGER REFERENCES teams(id),   -- null = sub
+  bowler_id      INTEGER REFERENCES bowlers(id),
+  position_order INTEGER,
+  book_average   INTEGER,
+  is_sub         BOOLEAN DEFAULT false,
+  UNIQUE(season_id, bowler_id)
+);
+
+-- Schedule: unchanged
+CREATE TABLE schedule (
+  id               SERIAL PRIMARY KEY,
+  season_id        INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+  week_number      INTEGER NOT NULL,
+  bowl_date        DATE,
+  starting_lane    INTEGER DEFAULT 1,
+  lane_positions   JSONB,
+  is_position_round BOOLEAN DEFAULT false,
+  notes            TEXT,
+  UNIQUE(season_id, week_number)
+);
+
+-- Checkins: bowler_id now references permanent bowlers table
+CREATE TABLE checkins (
+  id           SERIAL PRIMARY KEY,
+  season_id    INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+  week_number  INTEGER NOT NULL,
+  bowler_id    INTEGER REFERENCES bowlers(id),
+  paid_amount  NUMERIC(10,2) NOT NULL,
+  checked_in_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(season_id, week_number, bowler_id)
+);
+
+-- Game results: bowler_id now references permanent bowlers table
+CREATE TABLE game_results (
+  id                  SERIAL PRIMARY KEY,
+  season_id           INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+  week_number         INTEGER NOT NULL,
+  game_number         INTEGER NOT NULL CHECK (game_number IN (1,2,3)),
+  bowler_id           INTEGER REFERENCES bowlers(id),
+  hand_type           TEXT NOT NULL,
+  hand_detail         TEXT,
+  pot_amount          NUMERIC(10,2),
+  is_progressive_win  BOOLEAN DEFAULT false,
+  progressive_payout  NUMERIC(10,2) DEFAULT 0,
+  total_payout        NUMERIC(10,2),
+  created_at          TIMESTAMP DEFAULT NOW()
+);
+
+-- Progressive pot ledger: unchanged
+CREATE TABLE progressive_pot (
+  id               SERIAL PRIMARY KEY,
+  season_id        INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+  week_number      INTEGER,
+  transaction_type TEXT NOT NULL,
+  amount           NUMERIC(10,2) NOT NULL,
+  balance_after    NUMERIC(10,2) NOT NULL,
+  notes            TEXT,
+  created_at       TIMESTAMP DEFAULT NOW()
+);
+
+-- Charity fund ledger: unchanged
+CREATE TABLE charity_fund (
+  id               SERIAL PRIMARY KEY,
+  season_id        INTEGER REFERENCES seasons(id) ON DELETE CASCADE,
+  week_number      INTEGER,
+  transaction_type TEXT NOT NULL,
+  amount           NUMERIC(10,2) NOT NULL,
+  balance_after    NUMERIC(10,2) NOT NULL,
+  notes            TEXT,
+  created_at       TIMESTAMP DEFAULT NOW()
+);
+
+-- Settings: unchanged
+CREATE TABLE settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+```
+
+### Key Query Pattern Changes
+Any query that previously joined `bowlers` via `season_id` must now join through `season_roster`:
+
+```sql
+-- OLD: get bowlers for a season
+SELECT * FROM bowlers WHERE season_id = $1
+
+-- NEW: get bowlers for a season
+SELECT b.*, sr.position_order, sr.book_average, sr.is_sub, sr.team_id
+FROM bowlers b
+JOIN season_roster sr ON sr.bowler_id = b.id
+WHERE sr.season_id = $1
+
+-- OLD: get team for a bowler
+SELECT t.name FROM teams t WHERE t.id = b.team_id
+
+-- NEW: get team for a bowler in a season
+SELECT t.name, st.team_number
+FROM teams t
+JOIN season_teams st ON st.team_id = t.id
+WHERE st.season_id = $1 AND t.id = sr.team_id
+```
+
+### Files That Need Updating (full list)
+
+**Schema (run in Neon console):**
+- Drop and recreate all tables per new schema above
+- Reseed settings table
+
+**API Routes — all need query updates:**
+- `app/api/setup/save-season/route.js` — write to `teams`, `season_teams`, `bowlers`, `season_roster`
+- `app/api/checkin/route.js` — join through `season_roster` for bowler lists
+- `app/api/checkin/edit-name/route.js` — update `bowlers` table directly (no season scope)
+- `app/api/gamenight/route.js` — join through `season_roster`
+- `app/api/report/route.js` — join through `season_roster`
+- `app/api/dashboard/route.js` — join through `season_roster`
+- `app/api/schedule/route.js` — unchanged (no bowler joins)
+- `app/api/roster/route.js` — join through `season_roster`, update both `bowlers` and `season_roster`
+- `app/api/roster/import/route.js` — merge logic targets `season_roster`, identity matching via `bowlers.imported_name`
+
+**No visual/UX changes** — all page.js files are unchanged. This is a pure backend/query refactor.
+
+### Data Preservation
+One week of real data (Week 7, Summer 2026) has been exported to JSON and saved locally:
+- `seasons.json`, `teams.json`, `bowlers.json`, `checkins.json`
+- `game_results.json`, `progressive_pot.json`, `charity_fund.json`
+
+After the schema refactor, this data must be reimported into the new structure. The mapping is:
+- Old `bowlers` rows → new `bowlers` (league-wide) + `season_roster` (season-scoped)
+- Old `teams` rows → new `teams` (league-wide) + `season_teams` (season-scoped)
+- `checkins` and `game_results` `bowler_id` values must map to new permanent `bowlers.id`
+- Week 7 bowl_date needs to be corrected to `2026-06-04` (Wednesday June 4, 2026) — the stored date is wrong
 
 ---
 
@@ -73,18 +281,25 @@ Per game = totals / 3
 bowling-poker-manager/
 ├── app/
 │   ├── globals.css
-│   ├── layout.js              ← nav: Dashboard, Check-In, Game Night, Report, Schedule, History, Settings
-│   ├── page.js                ← Dashboard (placeholder)
-│   ├── setup/page.js          ← Season setup, PDF import
+│   ├── layout.js              ← nav: Dashboard, Check-In, Game Night, Report, Schedule, Roster, History, Settings
+│   ├── page.js                ← Dashboard
+│   ├── setup/page.js          ← Season setup, PDF import (access via Settings nav — not in main nav)
 │   ├── checkin/page.js        ← Check-in screen
 │   ├── gamenight/page.js      ← Game Night screen
 │   ├── report/page.js         ← Weekly Report (PNG export)
+│   ├── schedule/page.js       ← Schedule screen
+│   ├── roster/page.js         ← Roster management + re-import PDF
 │   └── api/
 │       ├── checkin/
-│       │   ├── route.js       ← GET checkins, POST checkin/uncheckout/lock/unlock
+│       │   ├── route.js
 │       │   └── edit-name/route.js
 │       ├── gamenight/route.js
 │       ├── report/route.js
+│       ├── dashboard/route.js
+│       ├── schedule/route.js
+│       ├── roster/
+│       │   ├── route.js
+│       │   └── import/route.js
 │       └── setup/
 │           ├── parse-roster/route.js
 │           ├── parse-schedule/route.js
@@ -92,8 +307,10 @@ bowling-poker-manager/
 ├── lib/
 │   ├── db.js                  ← Neon connection
 │   └── pdfParser.js           ← parseRosterPDF(), parseSchedulePDF(), normalizeName()
-├── next.config.js             ← framework: nextjs, serverExternalPackages: pdf-parse
-├── vercel.json                ← {"framework": "nextjs"}
+├── .nvmrc                     ← Node 24.16.0 pin
+├── .npmrc                     ← engine-strict=false
+├── next.config.js
+├── vercel.json
 ├── package.json               ← dev port 3005
 └── .env.local                 ← DATABASE_URL (gitignored)
 ```
@@ -103,117 +320,126 @@ bowling-poker-manager/
 ## Screens — Completed ✅
 
 ### Season Setup (`/setup`)
-- Upload League Standings PDF (BLS software output) → imports teams, bowlers, subs
-- Upload Schedule/Bylaws PDF → imports 16-week lane assignments
-- Handles Week 1 (mashed format) and Week 2+ (spaced format) PDF layouts
-- VACANT rows parsed as placeholder bowlers
-- Names editable inline (click display name)
-- Season name → Save Season (replaces existing season with same name)
-- Save blocked until both PDFs uploaded + name entered
+- Upload League Standings PDF → imports teams, bowlers, subs
+- Upload Schedule PDF → imports 16-week lane assignments
+- Access via Settings page (not main nav — destructive operation)
+- After refactor: writes to `teams`, `season_teams`, `bowlers`, `season_roster`
 
 ### Check-In (`/checkin`)
-- Auto-detects current week from schedule (nearest bowling Wednesday logic)
+- Auto-detects current week
 - Week selector dropdown
-- Alphabetical by normalized_name, top-to-bottom in 4 columns
-- Tap to toggle check-in (checkmark + highlight)
+- 4-column alphabetical grid
+- Tap to toggle check-in
 - VACANT shown dimmed, non-tappable
-- Subs section below (Z- prefix sorts to end)
-- Edit modal (✎) — edits full_name, derives normalized_name, re-sorts
-- **Lock Night** button → records progressive + charity contributions, locks amounts
-- **Unlock Night** → reverses contributions + clears game results
-- Locked state: cards dimmed, no toggling, banner shows night's financials
+- Subs section below, alphabetical, no Z- prefix
+- Edit modal (✎) — edits full_name on permanent bowlers record
+- Lock Night / Unlock Night
 
 ### Game Night (`/gamenight`)
 - Auto-detects current week
-- Payout Summary card showing per-game amounts (pool, charity, progressive, payout)
-- 3 game entry slots with winner autocomplete (checked-in players only)
-- Hand type dropdown (Royal Flush → High Card) + detail field
-- Progressive auto-ticks on Royal Flush, locked otherwise
-- Add another winner button (tie split)
-- Save per game, Edit to re-enter
-- Progressive win column shows +$amount in summary
+- Payout Summary card
+- 3 game entry slots with winner autocomplete
+- Hand type dropdown + detail field
+- Progressive auto-ticks on Royal Flush
+- Tie split support
 - Running totals: Progressive Pot, Charity Fund
 
 ### Weekly Report (`/report`)
-- Auto-loads most recent fully completed week (all 3 games entered)
-- Week selector (completed weeks only)
+- Auto-loads most recent completed week
+- Week selector
 - Dark/Light theme toggle
-- Pride-themed card: rainbow stripe, color-coded borders per box
-- Game results table with winners, hands, payouts, progressive win indicator
-- Charity Fund + Progressive Pot running totals
-- **Download PNG** button (2x resolution via html-to-image)
+- Pride-themed card with rainbow stripe
+- Download PNG (2x resolution)
+
+### Schedule (`/schedule`)
+- All 16 weeks with lane assignments
+- Edit starting_lane per week
+- Position round weeks editable
+- Current week highlighted
+
+### Roster (`/roster`)
+- All teams for active season, one card per team
+- Columns: #, Full Name, Display Name (auto-derived), Avg, Email
+- Click Full Name or Email to edit inline — saves instantly
+- Click Team Name in header to edit
+- VACANT rows dimmed but editable
+- Subs section at bottom
+- Collapsible Re-import PDF panel at top
+  - Non-destructive merge — never deletes bowlers with history
+  - Preview diff with checkboxes before committing
+  - Matches on imported_name (immutable identity key)
 
 ---
 
 ## Screens — Not Yet Built ❌
 
-### Dashboard (`/`)
-- Lane graphic showing 6 lane pairs with teams/bowlers for current week
-- Season stats hero
-
-### Schedule (`/schedule`)
-- View all 16 weeks with lane assignments
-- Edit starting_lane per week
-- Position round weeks editable
+### Dashboard (`/`) — partial
+- Current week banner and nav cards exist
+- Lane graphic showing teams/bowlers for current week — not built
 
 ### History (`/history`)
 - Past weeks selector
-- Win leaderboard (who has won most games)
+- Win leaderboard (lifetime and per-season)
 - Full game log by season
+- Depends on stable bowler identity — requires schema refactor first
 
 ### Settings (`/settings`)
 - Buy-in amount
 - Progressive nightly amount
-- Charity target info
 - Charity zero-out (with confirmation + audit trail)
+- Link/access to Season Setup (`/setup`)
 
 ---
 
 ## PDF Parsing Details
 
 ### League Standings PDF (BLS software)
-- Page 2: Team Rosters — two formats:
-  - **Week 1**: `1 - Snappy Backends` / `Lane 13` (split lines), bowler data mashed: `Mark Bertelsen156347048...171`
-  - **Week 2+**: `1 - Snappy BackendsLane 7` (single line), bowler data spaced: `Mark Bertelsen 156 3 470...171`
+- Page 2: Team Rosters
+  - **Week 1 format**: team header split across two lines, bowler data mashed
+  - **Week 2+ format**: team header single line, bowler data space-separated
 - Page 3: Temporary Substitutes
-- Page 4: Ignored (Queer Bowling announcement)
+- Page 4: Ignored
 - VACANT rows included as placeholder bowlers
-- Awards section filtered out (USBC ID pattern `\d{3}-\d{5}`)
-- Birthday section filtered out
+- Awards/birthday sections filtered out
 
-### Schedule/Bylaws PDF (BLS-2026/PRO)
+### Schedule/Bylaws PDF
 - Lane assignments on last page
 - Format: `Wk07 06/03 5- 7 4- 12 2- 10 1- 9 6- 8 3- 11`
-- Week 12 has split line — handled by continuation join
-- Week 15: `{ Position Round- Start Lane - 5` — detected as position round
-- `starting_lane` defaults to 1 (editable per week on Schedule screen)
+- Week 12 split line handled by continuation join
+- Week 15 position round detection
 
 ### Name Normalization
 - Format: `First LastInitial` (e.g. `Mark B`)
 - Strips role suffixes: `-*`, `-Sec`, `-Tr`, `-Pres`, `-VP`
 - Skips generational suffixes: II, III, Jr, Sr
-- Subs get `Z-` prefix
-- Edit via ✎ in Check-in: edits full_name → derives normalized_name server-side
+- Subs get NO prefix — segregated by `is_sub` flag
+- `imported_name` stores the original PDF name and is NEVER modified after insert
 
 ---
 
 ## Key Notes / Gotchas
 
-1. **Season ID**: Active season is id=5 (not 1 — multiple test saves created earlier IDs)
-2. **$env:DATABASE_URL**: Home Windows machine had an old DATABASE_URL in the PowerShell session — always check `$env:DATABASE_URL` is null before running dev
-3. **pdf-parse**: Must use `require('pdf-parse/lib/pdf-parse.js')` directly (not `require('pdf-parse')`) to avoid test file error
-4. **Neon numeric columns**: Returned as strings — always wrap in `parseFloat()` before math
-5. **git**: `core.autocrlf false` set on all machines. node_modules excluded via .gitignore. vercel.json required for Vercel to detect Next.js
-6. **Lock before Game Night**: Financial amounts (pool, payout, charity, progressive) are locked at check-in time. Game Night only records winners.
-7. **Progressive pot**: Carries across weeks/seasons until Royal Flush. First Royal Flush of the night wins everything. Subsequent Royal Flushes in same night get $0 progressive.
+1. **pdf-parse**: Must use `require('pdf-parse/lib/pdf-parse.js')` directly
+2. **Neon numeric columns**: Returned as strings — always wrap in `parseFloat()` before math
+3. **git**: `node_modules/`, `.next/`, `.env.local` all gitignored
+4. **Lock before Game Night**: Financial amounts locked at check-in time
+5. **Progressive pot**: Carries across weeks until Royal Flush
+6. **Mac nvm**: Run `nvm use` in project folder after opening new Terminal
+7. **Z- prefix REMOVED**: Subs no longer have Z- prefix. Live DB migrated with SUBSTRING query
+8. **imported_name**: Immutable identity key on bowlers. Set once at insert, never updated. Used for PDF re-import matching. DO NOT update this field in any edit operation
+9. **Season setup is destructive**: `/setup` is intentionally kept off the main nav. Will be accessed via Settings page (not yet built)
+10. **Schema refactor pending**: Do not add features that depend on the old season-scoped bowlers/teams structure until the refactor is complete
 
 ---
 
-## Current DB State (Season 5 — Summer 2026)
-- 12 teams, 77 bowlers (52 regular + 25 subs)
-- Week 7 (Jun 3, 2026) tested and verified
-- Progressive pot: $0 (won in Week 7 test)
-- Charity fund: $32.00
+## Current DB State
+- Schema refactor PENDING (see above)
+- One week of real data exported to JSON for preservation:
+  - Season: Summer 2026 (id=7)
+  - 12 teams, 77 bowlers (52 regular + 25 subs)
+  - Week 7 data: checkins, game results, progressive pot, charity fund
+  - Week 7 bowl_date needs correction to 2026-06-04
+  - Files saved locally: seasons.json, teams.json, bowlers.json, checkins.json, game_results.json, progressive_pot.json, charity_fund.json
 
 ---
 
@@ -223,6 +449,7 @@ bowling-poker-manager/
 - **Accent**: `#e8ff47` (yellow)
 - **Accent2**: `#ff6b35` (orange)
 - **Green**: `#3dffa0`
+- **Blue**: `#4fa3ff`
 - **Fonts**: Bebas Neue (headers), DM Mono (data/body)
 - **Dark theme** throughout app
 - **Report card**: Pride rainbow stripe + color-coded box borders (red/orange/green/blue/purple/teal)
