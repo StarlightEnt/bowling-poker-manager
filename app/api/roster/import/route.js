@@ -35,60 +35,93 @@ export async function POST(request) {
             }
 
             case 'bowler_average': {
-              await sql`UPDATE bowlers SET book_average = ${change.newAverage} WHERE id = ${change.bowlerId}`;
+              // book_average lives in season_roster, not bowlers
+              await sql`
+                UPDATE season_roster
+                SET book_average = ${change.newAverage}
+                WHERE bowler_id = ${change.bowlerId} AND season_id = ${seasonId}
+              `;
               applied++;
               break;
             }
 
             case 'new_bowler': {
-              // Get team db id
-              const [team] = await sql`SELECT id FROM teams WHERE season_id = ${seasonId} AND team_number = ${change.teamNumber}`;
+              // Resolve permanent team id via season_teams
+              const [team] = await sql`
+                SELECT t.id FROM teams t
+                JOIN season_teams st ON st.team_id = t.id
+                WHERE st.season_id = ${seasonId} AND st.team_number = ${change.teamNumber}
+              `;
               if (!team) break;
-              const normalizedName = normalizeName(change.fullName);
+
+              // Find or create permanent bowler record
+              let [dbBowler] = await sql`SELECT id FROM bowlers WHERE imported_name = ${change.fullName}`;
+              if (!dbBowler) {
+                const normalizedName = normalizeName(change.fullName);
+                [dbBowler] = await sql`
+                  INSERT INTO bowlers (full_name, normalized_name, imported_name)
+                  VALUES (${change.fullName}, ${normalizedName}, ${change.fullName})
+                  RETURNING id
+                `;
+              }
+
               await sql`
-                INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, imported_name, is_sub, position_order, book_average)
-                VALUES (${team.id}, ${seasonId}, ${change.fullName}, ${normalizedName}, ${change.fullName}, false, ${change.positionOrder}, ${change.bookAverage || null})
+                INSERT INTO season_roster (season_id, bowler_id, team_id, position_order, book_average, is_sub)
+                VALUES (${seasonId}, ${dbBowler.id}, ${team.id}, ${change.positionOrder}, ${change.bookAverage || null}, false)
               `;
               applied++;
               break;
             }
 
             case 'delete_vacant': {
-              // Safe — VACANT rows never have transactional data
+              // Remove from this season's roster, then delete the permanent row.
+              // VACANT rows have no transactional data so both deletes are safe.
+              await sql`DELETE FROM season_roster WHERE bowler_id = ${change.bowlerId} AND season_id = ${seasonId}`;
               await sql`DELETE FROM bowlers WHERE id = ${change.bowlerId} AND normalized_name = 'VACANT'`;
               applied++;
               break;
             }
 
             case 'promote_sub': {
-              // Sub becomes a team member — keep all history
-              const [team] = await sql`SELECT id FROM teams WHERE season_id = ${seasonId} AND team_number = ${change.teamNumber}`;
+              const [team] = await sql`
+                SELECT t.id FROM teams t
+                JOIN season_teams st ON st.team_id = t.id
+                WHERE st.season_id = ${seasonId} AND st.team_number = ${change.teamNumber}
+              `;
               if (!team) break;
               await sql`
-                UPDATE bowlers
+                UPDATE season_roster
                 SET team_id = ${team.id}, is_sub = false, position_order = ${change.positionOrder}
-                WHERE id = ${change.bowlerId}
+                WHERE bowler_id = ${change.bowlerId} AND season_id = ${seasonId}
               `;
               applied++;
               break;
             }
 
             case 'move_to_subs': {
-              // Team member moves to sub list — keep all history
               await sql`
-                UPDATE bowlers
+                UPDATE season_roster
                 SET team_id = null, is_sub = true
-                WHERE id = ${change.bowlerId}
+                WHERE bowler_id = ${change.bowlerId} AND season_id = ${seasonId}
               `;
               applied++;
               break;
             }
 
             case 'new_sub': {
-              const normalizedName = normalizeName(change.fullName);
+              let [dbBowler] = await sql`SELECT id FROM bowlers WHERE imported_name = ${change.fullName}`;
+              if (!dbBowler) {
+                const normalizedName = normalizeName(change.fullName);
+                [dbBowler] = await sql`
+                  INSERT INTO bowlers (full_name, normalized_name, imported_name)
+                  VALUES (${change.fullName}, ${normalizedName}, ${change.fullName})
+                  RETURNING id
+                `;
+              }
+
               await sql`
-                INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, imported_name, is_sub, position_order, book_average)
-                VALUES (null, ${seasonId}, ${change.fullName}, ${normalizedName}, ${change.fullName}, true, 0, ${change.bookAverage || null})
+                INSERT INTO season_roster (season_id, bowler_id, team_id, position_order, book_average, is_sub)
+                VALUES (${seasonId}, ${dbBowler.id}, null, 0, ${change.bookAverage || null}, true)
               `;
               applied++;
               break;
@@ -113,13 +146,20 @@ export async function POST(request) {
     const parsed = await pdfParse(buffer);
     const { teams: pdfTeams, subs: pdfSubs } = parseRosterPDF(parsed.text);
 
-    // Load current DB state
+    // Load current DB state via new schema
     const dbTeams = await sql`
-      SELECT id, team_number, name FROM teams WHERE season_id = ${seasonId} ORDER BY team_number ASC
+      SELECT t.id, st.team_number, t.name
+      FROM   teams t
+      JOIN   season_teams st ON st.team_id = t.id
+      WHERE  st.season_id = ${seasonId}
+      ORDER  BY st.team_number ASC
     `;
     const dbBowlers = await sql`
-      SELECT id, team_id, full_name, normalized_name, imported_name, is_sub, position_order, book_average
-      FROM bowlers WHERE season_id = ${seasonId}
+      SELECT b.id, sr.team_id, b.full_name, b.normalized_name, b.imported_name,
+             sr.is_sub, sr.position_order, sr.book_average
+      FROM   bowlers b
+      JOIN   season_roster sr ON sr.bowler_id = b.id
+      WHERE  sr.season_id = ${seasonId}
     `;
 
     const changes = [];
@@ -127,7 +167,7 @@ export async function POST(request) {
     // ── Team name changes ────────────────────────────────────────────────────
     for (const pdfTeam of pdfTeams) {
       const dbTeam = dbTeams.find(t => t.team_number === pdfTeam.team_number);
-      if (!dbTeam) continue; // new team — not handled (rare, would require season reset)
+      if (!dbTeam) continue;
       if (pdfTeam.name.trim() !== dbTeam.name.trim()) {
         changes.push({
           type: 'team_name',
@@ -148,8 +188,6 @@ export async function POST(request) {
 
       const teamBowlers = dbBowlers.filter(b => b.team_id === dbTeam.id && !b.is_sub);
       const dbSubs = dbBowlers.filter(b => b.is_sub);
-
-      // Track which DB bowlers on this team were matched
       const matchedDbIds = new Set();
 
       pdfTeam.bowlers.forEach((pdfBowler, posIdx) => {
@@ -158,11 +196,10 @@ export async function POST(request) {
         const positionOrder = posIdx + 1;
         const importedName = pdfBowler.full_name;
 
-        // 1. Try match on this team by imported_name
+        // 1. Match on this team by imported_name
         const teamMatch = teamBowlers.find(b => b.imported_name === importedName);
         if (teamMatch) {
           matchedDbIds.add(teamMatch.id);
-          // Average update?
           const newAvg = pdfBowler.book_average || null;
           const oldAvg = teamMatch.book_average ? parseInt(teamMatch.book_average) : null;
           if (newAvg !== oldAvg) {
@@ -180,12 +217,11 @@ export async function POST(request) {
           return;
         }
 
-        // 2. Try match in subs by imported_name — promote to team
+        // 2. Match in subs by imported_name → promote to team
         const subMatch = dbSubs.find(b => b.imported_name === importedName);
         if (subMatch) {
           matchedDbIds.add(subMatch.id);
 
-          // Is there a VACANT at this position to remove?
           const vacantAtPos = teamBowlers.find(b => b.normalized_name === 'VACANT' && b.position_order === positionOrder);
           if (vacantAtPos) {
             changes.push({
@@ -209,7 +245,7 @@ export async function POST(request) {
           return;
         }
 
-        // 3. Brand new bowler — check if VACANT at this position
+        // 3. Brand new bowler
         const vacantAtPos = teamBowlers.find(b => b.normalized_name === 'VACANT' && b.position_order === positionOrder);
         if (vacantAtPos) {
           changes.push({
@@ -232,7 +268,7 @@ export async function POST(request) {
         });
       });
 
-      // Bowlers on this team not matched by PDF → move to subs
+      // Unmatched team bowlers → move to subs
       for (const dbBowler of teamBowlers) {
         if (matchedDbIds.has(dbBowler.id)) continue;
         if (dbBowler.normalized_name === 'VACANT') continue;
@@ -252,10 +288,8 @@ export async function POST(request) {
     for (const pdfSub of pdfSubs) {
       const importedName = pdfSub.full_name;
 
-      // Already exists as sub?
       const existingSub = dbSubs.find(b => b.imported_name === importedName);
       if (existingSub) {
-        // Average update?
         const newAvg = pdfSub.book_average || null;
         const oldAvg = existingSub.book_average ? parseInt(existingSub.book_average) : null;
         if (newAvg !== oldAvg) {
@@ -273,11 +307,10 @@ export async function POST(request) {
         continue;
       }
 
-      // Already exists as team bowler? (handled above via promote logic — skip here)
+      // Already on a team (handled above) — skip
       const existingTeamBowler = dbBowlers.find(b => !b.is_sub && b.imported_name === importedName);
       if (existingTeamBowler) continue;
 
-      // Brand new sub
       changes.push({
         type: 'new_sub',
         fullName: importedName,

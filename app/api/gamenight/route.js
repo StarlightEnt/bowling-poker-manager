@@ -40,15 +40,15 @@ export async function GET(request) {
 
     const [scheduleRow] = await sql`SELECT week_number, bowl_date FROM schedule WHERE season_id = ${season.id} AND week_number = ${week}`;
 
-    // Checked-in bowlers
     const checkedIn = await sql`
-      SELECT b.id, b.normalized_name, b.full_name, b.is_sub, t.name as team_name
-      FROM checkins c
-      JOIN bowlers b ON c.bowler_id = b.id
-      LEFT JOIN teams t ON b.team_id = t.id
-      WHERE c.season_id = ${season.id} AND c.week_number = ${week}
-        AND b.normalized_name != 'VACANT'
-      ORDER BY b.normalized_name ASC
+      SELECT b.id, b.normalized_name, b.full_name, sr.is_sub, t.name AS team_name
+      FROM   checkins c
+      JOIN   bowlers b      ON c.bowler_id = b.id
+      JOIN   season_roster sr ON sr.bowler_id = b.id AND sr.season_id = ${season.id}
+      LEFT JOIN teams t     ON t.id = sr.team_id
+      WHERE  c.season_id = ${season.id} AND c.week_number = ${week}
+        AND  b.normalized_name != 'VACANT'
+      ORDER  BY b.normalized_name ASC
     `;
 
     const playerCount = checkedIn.length;
@@ -62,19 +62,15 @@ export async function GET(request) {
       charity: charityTotal / 3,
     };
 
-    // Check if night is locked
     const lockRows = await sql`SELECT id FROM progressive_pot WHERE season_id = ${season.id} AND week_number = ${week} AND transaction_type = 'lock'`;
     const isLocked = lockRows.length > 0;
 
-    // Current progressive pot balance (after tonight's lock contribution if locked)
     const [progRow] = await sql`SELECT balance_after FROM progressive_pot WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1`;
     const progressiveBalance = progRow ? parseFloat(progRow.balance_after) : 0;
 
-    // Current charity balance
     const [charRow] = await sql`SELECT balance_after FROM charity_fund WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1`;
     const charityBalance = charRow ? parseFloat(charRow.balance_after) : 0;
 
-    // Game results for this week
     const results = await sql`
       SELECT gr.*, b.normalized_name, b.full_name
       FROM game_results gr
@@ -83,7 +79,6 @@ export async function GET(request) {
       ORDER BY gr.game_number, gr.id
     `;
 
-    // Check if progressive already won this week
     const progressiveWonRow = await sql`SELECT id FROM game_results WHERE season_id = ${season.id} AND week_number = ${week} AND is_progressive_win = true LIMIT 1`;
     const progressiveAlreadyWon = progressiveWonRow.length > 0;
 
@@ -118,14 +113,9 @@ export async function POST(request) {
   try {
     const { seasonId, weekNumber, gameNumber, winners, handType, handDetail, perGame, isProgressiveWin } = await request.json();
 
-    // Delete existing results for this game (clean re-entry)
     await sql`DELETE FROM game_results WHERE season_id = ${seasonId} AND week_number = ${weekNumber} AND game_number = ${gameNumber}`;
-
-    // If we're clearing a previous Royal Flush, restore the progressive pot
-    // by deleting the payout entry so the balance recalculates correctly
     await sql`DELETE FROM progressive_pot WHERE season_id = ${seasonId} AND week_number = ${weekNumber} AND transaction_type = 'payout'`;
 
-    // Get fresh progressive balance (after lock contribution, after any deletions)
     const [progRow] = await sql`SELECT balance_after FROM progressive_pot WHERE season_id = ${seasonId} ORDER BY id DESC LIMIT 1`;
     const progressiveBalance = progRow ? parseFloat(progRow.balance_after) : 0;
 
@@ -139,7 +129,6 @@ export async function POST(request) {
       `;
     }
 
-    // Only write to progressive_pot on Royal Flush — zero it out
     let newProgressiveBalance = progressiveBalance;
     if (isProgressiveWin) {
       newProgressiveBalance = 0;

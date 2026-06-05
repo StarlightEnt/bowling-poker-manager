@@ -10,17 +10,17 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
     }
 
-    // If a season with this name already exists, delete it
-    // ON DELETE CASCADE handles teams, bowlers, schedule, checkins, game_results, etc.
+    // Delete existing season with this name.
+    // CASCADE removes season_teams, season_roster, schedule, checkins,
+    // game_results, progressive_pot, charity_fund — but NOT the permanent
+    // bowlers or teams tables.
     const existing = await sql`SELECT id FROM seasons WHERE name = ${seasonName}`;
     if (existing.length > 0) {
       await sql`DELETE FROM seasons WHERE name = ${seasonName}`;
     }
 
-    // Deactivate any other active seasons
     await sql`UPDATE seasons SET is_active = false WHERE is_active = true`;
 
-    // Create new season
     const [season] = await sql`
       INSERT INTO seasons (name, is_active)
       VALUES (${seasonName}, true)
@@ -28,38 +28,73 @@ export async function POST(request) {
     `;
     const seasonId = season.id;
 
-    // Insert teams — build team_number → db_id map for schedule use
-    const teamIdMap = {};
     for (const team of teams) {
-      const [savedTeam] = await sql`
-        INSERT INTO teams (season_id, team_number, name)
-        VALUES (${seasonId}, ${team.team_number}, ${team.name})
-        RETURNING id
+      // Find or create the permanent team record (matched by name)
+      let [dbTeam] = await sql`SELECT id FROM teams WHERE name = ${team.name}`;
+      if (!dbTeam) {
+        [dbTeam] = await sql`INSERT INTO teams (name) VALUES (${team.name}) RETURNING id`;
+      }
+      const teamId = dbTeam.id;
+
+      await sql`
+        INSERT INTO season_teams (season_id, team_id, team_number)
+        VALUES (${seasonId}, ${teamId}, ${team.team_number})
       `;
-      teamIdMap[team.team_number] = savedTeam.id;
 
       for (let i = 0; i < team.bowlers.length; i++) {
         const b = team.bowlers[i];
+        let bowlerId;
+
+        if (b.normalized_name === 'VACANT') {
+          // Always insert a new VACANT row — never reuse an existing one.
+          // A season can have multiple VACANT slots across different teams;
+          // sharing one bowler_id would violate UNIQUE(season_id, bowler_id)
+          // in season_roster.
+          const [newBowler] = await sql`
+            INSERT INTO bowlers (full_name, normalized_name, imported_name)
+            VALUES ('VACANT', 'VACANT', 'VACANT')
+            RETURNING id
+          `;
+          bowlerId = newBowler.id;
+        } else {
+          // Find or create permanent bowler record (matched by imported_name)
+          let [dbBowler] = await sql`SELECT id FROM bowlers WHERE imported_name = ${b.full_name}`;
+          if (!dbBowler) {
+            [dbBowler] = await sql`
+              INSERT INTO bowlers (full_name, normalized_name, imported_name)
+              VALUES (${b.full_name}, ${b.normalized_name}, ${b.full_name})
+              RETURNING id
+            `;
+          }
+          bowlerId = dbBowler.id;
+        }
+
         await sql`
-          INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, imported_name, is_sub, position_order, book_average)
-          VALUES (${savedTeam.id}, ${seasonId}, ${b.full_name}, ${b.normalized_name}, ${b.full_name}, false, ${i + 1}, ${b.book_average || null})
+          INSERT INTO season_roster (season_id, bowler_id, team_id, position_order, book_average, is_sub)
+          VALUES (${seasonId}, ${bowlerId}, ${teamId}, ${i + 1}, ${b.book_average || null}, false)
         `;
       }
     }
 
-    // Insert substitutes (no team)
     for (let i = 0; i < subs.length; i++) {
       const s = subs[i];
+      let [dbBowler] = await sql`SELECT id FROM bowlers WHERE imported_name = ${s.full_name}`;
+      if (!dbBowler) {
+        [dbBowler] = await sql`
+          INSERT INTO bowlers (full_name, normalized_name, imported_name)
+          VALUES (${s.full_name}, ${s.normalized_name}, ${s.full_name})
+          RETURNING id
+        `;
+      }
+
       await sql`
-        INSERT INTO bowlers (team_id, season_id, full_name, normalized_name, imported_name, is_sub, position_order, book_average)
-        VALUES (null, ${seasonId}, ${s.full_name}, ${s.normalized_name}, ${s.full_name}, true, ${i + 1}, ${s.book_average || null})
+        INSERT INTO season_roster (season_id, bowler_id, team_id, position_order, book_average, is_sub)
+        VALUES (${seasonId}, ${dbBowler.id}, null, ${i + 1}, ${s.book_average || null}, true)
       `;
     }
 
-    // Insert schedule weeks
     if (weeks && weeks.length > 0) {
       for (const week of weeks) {
-        // Parse date MM/DD — roll to next year if month already passed
         let bowlDate = null;
         if (week.bowl_date_str) {
           const [mm, dd] = week.bowl_date_str.split('/').map(Number);
@@ -69,9 +104,6 @@ export async function POST(request) {
           bowlDate = `${year}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
         }
 
-        // Build lane_positions: one entry per individual lane, left to right.
-        // PDF gives pairs (9-3 = team 9 on one lane, team 3 on the next lane).
-        // Flatten: [9, 3, 1, 10, ...] → 12 entries for 12 teams.
         let lanePositions = null;
         if (!week.is_position_round && week.lane_pairs && week.lane_pairs.length > 0) {
           lanePositions = week.lane_pairs.flatMap(p => [p.home, p.away]);

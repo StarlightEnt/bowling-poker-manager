@@ -1,9 +1,6 @@
-import { neon } from '@neondatabase/serverless';
+// PATH: app/api/dashboard/route.js
+import sql from '@/lib/db';
 
-const sql = neon(process.env.DATABASE_URL);
-
-// Same logic as checkin route — check today (if Wed), then next 3 Wednesdays,
-// then fall back to next upcoming non-position-round week by date.
 function getWeekCandidates() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -48,7 +45,6 @@ export async function GET() {
     const season = seasons[0];
     const sid = season.id;
 
-    // All schedule rows with status (for progress bar)
     const schedRows = await sql`
       SELECT
         s.week_number,
@@ -70,12 +66,10 @@ export async function GET() {
       ORDER BY s.week_number ASC
     `;
 
-    // Use the same date-based detection as the check-in screen
     const weekNum = await detectWeek(sid);
     const currentWeek = schedRows.find(w => w.week_number === weekNum)
       || schedRows[schedRows.length - 1];
 
-    // Checked-in count for current week
     const checkinRows = await sql`
       SELECT COUNT(*) AS cnt
       FROM checkins c
@@ -86,14 +80,16 @@ export async function GET() {
     `;
     const checkedIn = parseInt(checkinRows[0]?.cnt ?? 0, 10);
 
-    // Total bowlers (non-vacant, non-sub regulars)
     const bowlerRows = await sql`
-      SELECT COUNT(*) AS cnt FROM bowlers
-      WHERE season_id = ${sid} AND normalized_name != 'VACANT' AND is_sub = false
+      SELECT COUNT(*) AS cnt
+      FROM season_roster sr
+      JOIN bowlers b ON b.id = sr.bowler_id
+      WHERE sr.season_id = ${sid}
+        AND b.normalized_name != 'VACANT'
+        AND sr.is_sub = false
     `;
     const totalBowlers = parseInt(bowlerRows[0]?.cnt ?? 0, 10);
 
-    // Games entered this week
     const gameRows = await sql`
       SELECT COUNT(DISTINCT game_number) AS cnt
       FROM game_results
@@ -101,7 +97,6 @@ export async function GET() {
     `;
     const gamesEntered = parseInt(gameRows[0]?.cnt ?? 0, 10);
 
-    // Progressive pot balance
     const progRows = await sql`
       SELECT balance_after FROM progressive_pot
       WHERE season_id = ${sid}
@@ -109,7 +104,6 @@ export async function GET() {
     `;
     const progressivePot = parseFloat(progRows[0]?.balance_after ?? 0);
 
-    // Charity fund balance
     const charityRows = await sql`
       SELECT balance_after FROM charity_fund
       WHERE season_id = ${sid}
@@ -117,7 +111,6 @@ export async function GET() {
     `;
     const charityFund = parseFloat(charityRows[0]?.balance_after ?? 0);
 
-    // Weeks complete so far
     const weeksComplete = schedRows.filter(w => w.status === 'complete').length;
     const totalWeeks = schedRows.length;
 

@@ -9,21 +9,23 @@ export async function GET() {
     if (!season) return NextResponse.json({ error: 'No active season' }, { status: 404 });
 
     const teams = await sql`
-      SELECT id, team_number, name
-      FROM teams
-      WHERE season_id = ${season.id}
-      ORDER BY team_number ASC
+      SELECT t.id, st.team_number, t.name
+      FROM   teams t
+      JOIN   season_teams st ON st.team_id = t.id
+      WHERE  st.season_id = ${season.id}
+      ORDER  BY st.team_number ASC
     `;
 
     const bowlers = await sql`
-      SELECT id, team_id, full_name, normalized_name, is_sub, book_average, email,
-             normalized_name = 'VACANT' AS is_vacant
-      FROM bowlers
-      WHERE season_id = ${season.id}
-      ORDER BY is_sub ASC, normalized_name ASC
+      SELECT b.id, sr.team_id, b.full_name, b.normalized_name,
+             sr.is_sub, sr.book_average, b.email,
+             b.normalized_name = 'VACANT' AS is_vacant
+      FROM   bowlers b
+      JOIN   season_roster sr ON sr.bowler_id = b.id
+      WHERE  sr.season_id = ${season.id}
+      ORDER  BY sr.is_sub ASC, b.normalized_name ASC
     `;
 
-    // Group bowlers by team
     const teamMap = teams.map(team => ({
       ...team,
       bowlers: bowlers.filter(b => b.team_id === team.id && !b.is_sub),
@@ -49,7 +51,6 @@ export async function PATCH(request) {
     const { type, id, ...fields } = body;
 
     if (type === 'team') {
-      // Update team name
       const { name } = fields;
       if (!name?.trim()) return NextResponse.json({ error: 'Team name required' }, { status: 400 });
       await sql`UPDATE teams SET name = ${name.trim()} WHERE id = ${id}`;
@@ -57,7 +58,6 @@ export async function PATCH(request) {
     }
 
     if (type === 'bowler') {
-      // Update bowler fields — full_name always re-derives normalized_name
       const { full_name, email } = fields;
       if (!full_name?.trim()) return NextResponse.json({ error: 'Full name required' }, { status: 400 });
 
@@ -67,9 +67,9 @@ export async function PATCH(request) {
 
       await sql`
         UPDATE bowlers
-        SET full_name        = ${full_name.trim()},
-            normalized_name  = ${normalizedName},
-            email            = ${email?.trim() || null}
+        SET full_name       = ${full_name.trim()},
+            normalized_name = ${normalizedName},
+            email           = ${email?.trim() || null}
         WHERE id = ${id}
       `;
       return NextResponse.json({ success: true, normalizedName });

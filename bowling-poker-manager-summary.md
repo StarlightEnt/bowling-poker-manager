@@ -60,7 +60,7 @@ Built to be sold/licensed to other leagues — must be robust, multi-season, mul
 
 ---
 
-## ⚠️ PENDING SCHEMA REFACTOR — MUST BE DONE BEFORE FURTHER DEVELOPMENT
+## ✅ SCHEMA REFACTOR — COMPLETE (June 5, 2026)
 
 ### Background
 The current schema treats bowlers and teams as season-scoped entities — every new season deletes and recreates all bowler and team records. This is architecturally wrong for a multi-season league management tool:
@@ -433,13 +433,12 @@ bowling-poker-manager/
 ---
 
 ## Current DB State
-- Schema refactor PENDING (see above)
-- One week of real data exported to JSON for preservation:
-  - Season: Summer 2026 (id=7)
-  - 12 teams, 77 bowlers (52 regular + 25 subs)
-  - Week 7 data: checkins, game results, progressive pot, charity fund
-  - Week 7 bowl_date needs correction to 2026-06-04
-  - Files saved locally: seasons.json, teams.json, bowlers.json, checkins.json, game_results.json, progressive_pot.json, charity_fund.json
+- Schema refactor COMPLETE (June 5, 2026)
+- New schema live in Neon (season_id=1)
+- 12 permanent teams, 77 permanent bowlers (52 regular + 25 subs)
+- Week 7 data fully restored: 25 checkins, 3 game results, progressive pot ($3), charity fund ($32)
+- Week 7 bowl_date = 2026-06-03 (June 3), Week 8 bowl_date = 2026-06-10 (June 10)
+- JSON backup files still at: C:\Users\allis\Downloads\Bowling Poker Database Files\
 
 ---
 
