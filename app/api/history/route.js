@@ -207,12 +207,14 @@ export async function GET(request) {
         }
 
         // Weeks from charity_fund (week 7+)
+        // donation is already baked into entry.amount at lock time — use entry.amount only
+        // donation is still attached for tooltip display only
         const liveWeeks = charityEntries.filter(e => e.season_id === season.id);
         for (const entry of liveWeeks) {
           const don = donations.find(
             d => d.season_id === season.id && d.week_number === entry.week_number
           );
-          const weekTotal = parseFloat(entry.amount) + (don ? parseFloat(don.amount) : 0);
+          const weekTotal = parseFloat(entry.amount);
           runningBalance += weekTotal;
 
           // Get player count from checkins

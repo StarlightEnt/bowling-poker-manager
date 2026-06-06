@@ -1,5 +1,5 @@
 # Bowling Poker Manager — Project Summary
-*As of June 5, 2026*
+*As of June 5, 2026 (end of session)*
 
 ## How We Work Together
 - Discuss and agree on approach BEFORE writing any code
@@ -20,7 +20,10 @@
 ---
 
 ## Project Overview
-A web app replacing a manual Excel spreadsheet to manage a poker side-game during the LGBT Wednesday Community bowling league at Classic Bowling Center, San Francisco. Players pay $5 buy-in, draw cards for spares/strikes during 3 bowling games, and best 5-card poker hand wins each game.
+A web app replacing a manual Excel spreadsheet to manage a poker side-game during the
+LGBT Wednesday Community bowling league at Classic Bowling Center, Daly City, CA.
+Players pay $5 buy-in, draw cards for spares/strikes during 3 bowling games, and best
+5-card poker hand wins each game.
 
 Built to be sold/licensed to other leagues — must be robust, multi-season, multi-league capable.
 
@@ -58,40 +61,46 @@ Built to be sold/licensed to other leagues — must be robust, multi-season, mul
 - **Connection string**: Get from Neon console (console.neon.tech) → Connect button → Show password
 - **Branch**: production
 - **Active Season**: `Summer '26` (season id=1)
+- **Active League**: `LGBT Wednesday Community` (league id=1)
 - **Season naming convention**: `Summer 'YY` or `Fall/Winter 'YY-'YY` (always abbreviated years with apostrophe)
 
 ---
 
 ## Schema — Current State
 
-All tables live in Neon production. Schema refactor is COMPLETE.
+All tables live in Neon production. Schema is fully current as of June 5, 2026.
 
 ### Core tables
 ```
+leagues          — league identity (name, venue, charity_name) — NEW June 5
 bowlers          — permanent league-wide identity, one row per person forever
 teams            — permanent league-wide identity, one row per org forever
-seasons          — one row per season (charity_seed, progressive_seed columns added)
+seasons          — one row per season (league_id FK, charity_seed, progressive_seed)
 season_teams     — team membership per season with team_number
 season_roster    — bowler membership per season (team_id, book_average, is_sub)
 schedule         — 16-week lane assignments per season
-checkins         — weekly player check-ins
+checkins         — weekly player check-ins (lock status tracked here)
 game_results     — per-game winners, hands, payouts
 progressive_pot  — progressive ledger (contribution/payout entries)
-charity_fund     — charity ledger (contribution/payout entries)
-settings         — buyin_amount, progressive_nightly
+charity_fund     — charity ledger (combined pool + donation entries at lock time)
+settings         — league-scoped key/value: buyin_amount, progressive_nightly
+                   PRIMARY KEY is composite (league_id, key)
 ```
 
-### History tables (added June 5, 2026)
+### History tables
 ```
 historical_results   — game log from prior seasons (seeded from spreadsheet)
-historical_checkins  — weekly player counts for Summer '26 weeks 1-6 (includes charity_amount)
+historical_checkins  — weekly player counts Summer '26 weeks 1-6 (includes charity_amount)
+                       NOTE: uses season_name TEXT not season_id FK — always query by name
 charitable_donations — extra donations per week (season_id, week_number, amount, notes)
+                       one row per week max; baked into charity_fund at lock time
 ```
 
-### Key schema additions (June 5, 2026)
-- `seasons.charity_seed` — opening charity balance rolled over from prior seasons
-- `seasons.progressive_seed` — opening progressive balance rolled over from prior seasons
-- `historical_checkins.charity_amount` — actual charity collected per week (spreadsheet ground truth)
+### leagues table columns
+```
+id, name, venue_name, venue_city, venue_state, charity_name, created_at
+```
+Current values: LGBT Wednesday Community | Classic Bowling Center | Daly City | CA | SFGGCI 2027
 
 ### Golden Rules (never violate)
 - **A bowler is a bowler is a bowler** — one DB row per person, forever, never deleted
@@ -103,24 +112,53 @@ charitable_donations — extra donations per week (season_id, week_number, amoun
 
 ## Financial Formula
 ```
-Pool = playerCount × buyinAmount ($5)
-Progressive set-aside = $3/night (configurable in settings)
-Payout total = floor((Pool - 3) / 4) × 3
-Charity = Pool - 3 - Payout total
-Per game = totals / 3
+Pool = playerCount × buyin_amount
+Progressive set-aside = progressive_nightly (flat per night, from settings)
+  → per game progressive = progressive_nightly / 3 (calculated in code, never stored)
+Payout total = floor((Pool - progressive_nightly) / 4) × 3
+Charity (from pool) = Pool - progressive_nightly - Payout total
+Per game payout = payout total / 3
 ```
+
+### Charitable Donations
+- A player may donate extra cash any week (e.g. Joe K gives back $10 from winnings)
+- Entered via the **Additional Donation card** on Game Night screen
+- Stored in `charitable_donations` (season_id, week_number, amount, notes)
+- **One row per week maximum**
+- At lock time: `charity_fund` entry = pool formula charity + donation (combined as ONE entry)
+- `charitable_donations` is the source of record for History asterisk/tooltip only
+- NEVER add `charitable_donations` separately to running totals — it is already in `charity_fund`
 
 ### Financial Flow
 1. **Check-in** → mark players paid
-2. **Lock Night** → records progressive ($3) and charity contributions to ledgers ONCE
-3. **Game Night** → record winners only; no ledger writes except Royal Flush
-4. **Royal Flush** → zeroes progressive pot balance (payout entry in progressive_pot)
-5. **Unlock** → reverses lock entries + clears game results (if corrections needed)
+2. **Optional: Add Donation** on Game Night before locking
+3. **Lock Night** → writes combined charity (pool + donation) to `charity_fund`; writes progressive to `progressive_pot`
+4. **Game Night** → record winners only; no ledger writes except Royal Flush
+5. **Royal Flush** → zeroes progressive pot (payout entry in `progressive_pot`)
+6. **Unlock** → reverses lock entries + clears game results (destructive — use with care)
+7. **Donation Save/Clear on locked night** → silent relock: replaces `charity_fund` entry for that week only, never touches game_results or progressive_pot
+
+### Charity Running Total Formula (used everywhere)
+```
+running_charity =
+  seasons.charity_seed
+  + SUM(historical_checkins.charity_amount WHERE season_name = season.name)
+  + last charity_fund.balance_after (ORDER BY id DESC LIMIT 1, default 0 if none)
+```
+Three terms only. charitable_donations is NOT a separate additive term.
+
+### Progressive Running Total Formula (used everywhere)
+```
+running_progressive =
+  seasons.progressive_seed
+  + COUNT(historical_checkins rows WHERE season_name = season.name) × progressive_nightly
+  + last progressive_pot.balance_after (ORDER BY id DESC LIMIT 1, default 0 if none)
+```
 
 ### Seed Balances (Summer '26, season id=1)
-- `charity_seed` = **$253.00** (verified: $429 total − $176 season = $253)
-- `progressive_seed` = **$6.00** (verified: $27 total − $21 season = $6)
-- Grand total charity as of end of Week 7: **$429.00**
+- `charity_seed` = **$253.00**
+- `progressive_seed` = **$9.00** (corrected June 5 — was incorrectly $6.00)
+- Verified totals as of end of Week 7: charity **$429.00**, progressive **$30.00**
 
 ---
 
@@ -128,26 +166,31 @@ Per game = totals / 3
 ```
 bowling-poker-manager/
 ├── app/
-│   ├── globals.css
-│   ├── layout.js
+│   ├── globals.css                    ← light-mode stub added June 5
+│   ├── layout.js                      ← suppressHydrationWarning + theme script
 │   ├── page.js                        ← Dashboard
 │   ├── setup/page.js                  ← Season setup (access via Settings — destructive)
 │   ├── checkin/page.js
-│   ├── gamenight/page.js
+│   ├── gamenight/page.js              ← Donation card added June 5
 │   ├── report/page.js
 │   ├── schedule/page.js
 │   ├── roster/page.js
-│   ├── history/page.js                ← NEW (June 5, 2026)
+│   ├── history/page.js
+│   ├── settings/page.js               ← NEW June 5
 │   └── api/
-│       ├── checkin/route.js
+│       ├── checkin/route.js           ← lock writes combined charity+donation
 │       ├── checkin/edit-name/route.js
-│       ├── gamenight/route.js
-│       ├── report/route.js
+│       ├── gamenight/route.js         ← returns isLocked + donation in GET
+│       ├── gamenight/donation/route.js               ← NEW June 5
+│       ├── gamenight/donation/relock-charity/route.js ← NEW June 5
+│       ├── report/route.js            ← correct balance formulas + charityName
 │       ├── dashboard/route.js
 │       ├── schedule/route.js
 │       ├── roster/route.js
 │       ├── roster/import/route.js
-│       ├── history/route.js           ← NEW (June 5, 2026)
+│       ├── history/route.js           ← donation data in charity ledger rows
+│       ├── settings/route.js          ← NEW June 5
+│       ├── settings/charity-payout/route.js ← NEW June 5
 │       └── setup/
 │           ├── parse-roster/route.js
 │           ├── parse-schedule/route.js
@@ -172,15 +215,15 @@ bowling-poker-manager/
 ### Dashboard (`/`)
 - Season name pulled dynamically from DB
 - Current week banner with financials
-- Week detection looks BACKWARD to last completed week (fixed June 5)
+- Week detection looks BACKWARD to last completed week
 - Season progress bar (weeksComplete / totalWeeks)
 - Nav cards: Check-In, Game Night, Report, Schedule, History, Settings
-- Lane graphic: NOT YET BUILT
+- Lane graphic: NOT YET BUILT ❌
 
 ### Season Setup (`/setup`)
 - Upload League Standings PDF → imports teams, bowlers, subs
 - Upload Schedule PDF → imports 16-week lane assignments
-- Access via Settings page (not main nav)
+- Access via Settings page (not main nav — destructive operation)
 - Writes to `teams`, `season_teams`, `bowlers`, `season_roster`
 
 ### Check-In (`/checkin`)
@@ -194,19 +237,24 @@ bowling-poker-manager/
 
 ### Game Night (`/gamenight`)
 - Auto-detects current week
-- Zero-player guard: all values show $0.00 when no check-ins (fixed June 5)
+- Zero-player guard: all values show $0.00 when no check-ins
 - Payout Summary card
+- **Additional Donation card** — amount + notes, Save/Clear ← NEW June 5
+  - If night is locked: silent relock updates charity_fund immediately
+  - Context-aware helper text (locked vs unlocked state)
 - 3 game entry slots with winner autocomplete
 - Hand type dropdown + detail field
 - Progressive auto-ticks on Royal Flush
 - Tie split support
-- Running totals: Progressive Pot, Charity Fund
+- Running totals: Progressive Pot ($30), Charity Fund ($429 as of Wk 7)
 
 ### Weekly Report (`/report`)
 - Auto-loads most recent completed week
 - Week selector
 - Dark/Light theme toggle
 - Pride-themed card with rainbow stripe
+- Charity name pulled dynamically from `leagues.charity_name` (e.g. SFGGCI 2027)
+- Venue: Classic Bowling Center · Daly City, CA (dynamic from leagues table)
 - Download PNG (2x resolution)
 
 ### Schedule (`/schedule`)
@@ -225,25 +273,28 @@ bowling-poker-manager/
 - Subs section at bottom
 - Collapsible Re-import PDF panel (non-destructive merge)
 
-### History (`/history`) ← NEW June 5, 2026
-- Season filter dropdown (newest first: Summer '26, Fall/Winter '25-'26, Summer '25, Fall/Winter '24-'25)
-- Summary card:
-  - Weeks played, total games, total paid out, progressive wins
-  - Charity raised (clickable) → opens charity ledger drawer
-  - Paid to charity
-  - Winning hand breakdown with color-coded mini bars
-  - Top 5 by game wins (expandable to all 40)
-  - Top 5 by prize money (expandable to all 40)
-- Charity ledger drawer (click Charity Raised to open):
-  - Opening balance row (prior seasons rollover: $253)
-  - One row per week for active season (weeks 1-6 from historical_checkins, week 7+ from charity_fund)
-  - Completed seasons collapse to single summary row when is_active = false
-  - Donation asterisk (*) with click tooltip showing amount + freehand notes
+### History (`/history`)
+- Season filter dropdown (newest first)
+- Summary card: weeks played, total games, total paid out, progressive wins
+- Charity raised (clickable) → opens charity ledger drawer
+- Charity ledger drawer:
+  - Opening balance row (prior seasons rollover)
+  - One row per week (weeks 1-6 from historical_checkins, week 7+ from charity_fund)
+  - Donation asterisk (*) with click tooltip showing amount + notes
   - Running balance column
-  - Total: $429.00 as of Week 7
-- Game log table (220 results, date descending)
+- Game log table (220+ results, date descending)
   - Color-coded hand type badges
   - Progressive wins highlighted in yellow
+
+### Settings (`/settings`) ← NEW June 5
+- **League Identity**: name, venue name, city, state, charity name — all editable
+- **Game Rules**: buy-in amount, progressive nightly (÷3 validated, shows per-game calc)
+- **Season Seeds**: charity_seed + progressive_seed for active season (with warning)
+  - Shows current running totals (charity + progressive)
+- **Appearance**: dark/light mode toggle (localStorage, device-local)
+- **Danger Zone**:
+  - Charity Payout — full balance zero-out with confirmation modal, writes audit entry to charity_fund
+  - Season Setup link (with destructive warning)
 
 ---
 
@@ -251,18 +302,11 @@ bowling-poker-manager/
 
 ### Dashboard Lane Graphic
 - Visual showing teams/bowlers assigned to lanes for current week
-
-### Settings (`/settings`)
-- Buy-in amount (configurable)
-- Progressive nightly amount (configurable)
-- Charity zero-out with confirmation + audit trail
-- Season seed fields (charity_seed, progressive_seed) — auto-populated from prior season end balance, editable
-- Charitable donation entry per week (free text notes + amount, single entry per week)
-- Link/access to Season Setup (`/setup`)
+- Data available via schedule.lane_positions JSONB + season_roster
 
 ---
 
-## Historical Data — Seeded (June 5, 2026)
+## Historical Data — Seeded
 
 ### Sources
 - **WedStats sheet**: full game log for Fall/Winter '24-'25, Summer '25, Fall/Winter '25-'26
@@ -270,7 +314,7 @@ bowling-poker-manager/
 - **Live DB**: Summer '26 week 7+ (game_results, checkins, charity_fund, progressive_pot)
 
 ### Data in historical_results (217 rows)
-- All 4 seasons' game results normalized
+- All 4 prior seasons' game results normalized
 - Hand types standardized: Royal Flush, Straight Flush, Four of a Kind, Full House, Straight
 - Names normalized (trailing periods stripped)
 - Tie rows split into individual winner rows with split pot amounts
@@ -278,6 +322,7 @@ bowling-poker-manager/
 ### Data in historical_checkins (6 rows)
 - Summer '26 weeks 1-6 only
 - `charity_amount` = actual spreadsheet values (ground truth, NOT recalculated from formula)
+- Uses `season_name TEXT` column — NOT a foreign key to seasons.id
 
 ---
 
@@ -314,40 +359,43 @@ bowling-poker-manager/
 6. **Mac nvm**: Run `nvm use` in project folder after opening new Terminal
 7. **imported_name**: Immutable identity key. Set once at insert, never updated
 8. **Season setup is destructive**: `/setup` intentionally off main nav, accessed via Settings
-9. **Season id=1**: After refactor, active season is id=1 (not id=7 as originally noted)
-10. **Historical charity amounts**: Use `historical_checkins.charity_amount` directly — do NOT recalculate from pool formula (old formula differed from current)
+9. **Season id=1**: Active season is id=1 (post-refactor)
+10. **Historical charity amounts**: Use `historical_checkins.charity_amount` directly — do NOT recalculate from pool formula
 11. **Neon sql fragments**: Cannot use dynamic `sql` fragments as interpolated values — use separate query branches instead
 12. **New folders**: Always provide PowerShell `mkdir` command before presenting a file that goes in a new folder
 13. **Season naming**: Always `Summer 'YY` or `Fall/Winter 'YY-'YY` — never `Summer 2026`
+14. **historical_checkins uses season_name TEXT**: NOT a foreign key — always query by `season_name`, never by `season_id`
+15. **settings primary key is composite**: `(league_id, key)` — not just `key`
+16. **charity_fund entries include donations**: At lock time, pool formula + donation = one combined entry. Never add charitable_donations separately to running totals
+17. **Windows SSL for Node scripts**: Use `node --use-system-ca script.mjs` when running standalone scripts against Neon on Windows
+18. **Charity name**: `leagues.charity_name` = "SFGGCI 2027" — the year is part of the name (campaign year), not a mistake
 
 ---
 
 ## Design System
 - **Background**: `#0d0d0f`
 - **Surface**: `#141417`
+- **Surface2**: `#1a1a1e`
 - **Accent**: `#e8ff47` (yellow)
 - **Accent2**: `#ff6b35` (orange)
 - **Green**: `#3dffa0`
 - **Blue**: `#4fa3ff`
+- **Red**: `#ff4444`
+- **Muted**: `#555`
+- **Border**: `#222`
 - **Fonts**: Bebas Neue (headers), DM Mono (data/body)
 - **Dark theme** throughout app
+- **Light mode**: stub CSS only (`html.light-mode`) — full polish is a future task
 - **Report card**: Pride rainbow stripe + color-coded box borders
 
 ---
 
-## What's Left — Final Push
+## What's Left
 
-### Priority 1: Settings Screen
-- Buy-in amount
-- Progressive nightly amount
-- Charity zero-out with confirmation
-- Season seed fields (charity_seed, progressive_seed)
-- Charitable donation entry per week (amount + free text notes)
-- Link to Setup
-
-### Priority 2: Dashboard Lane Graphic
+### Priority 1: Dashboard Lane Graphic
 - Visual lane assignments for current week
+- Data source: `schedule.lane_positions` JSONB + `season_roster` + `season_teams`
 
-### Priority 3: General Cleanup
-- Vercel deploy verification
+### Priority 2: General Cleanup
+- Full light mode CSS polish (stub exists, needs design pass)
 - Any remaining hardcoded strings audit

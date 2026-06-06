@@ -127,7 +127,7 @@ export default function DashboardPage() {
       <div style={{ marginBottom: 28 }}>
         <h1 style={titleStyle}>{season.name}</h1>
         <p style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>
-          LGBT Wednesday Community League &nbsp;·&nbsp; Classic Bowling Center, San Francisco
+          LGBT Wednesday Community League &nbsp;·&nbsp; Classic Bowling Center, Daly City, CA
         </p>
       </div>
 

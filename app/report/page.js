@@ -220,7 +220,7 @@ export default function ReportPage() {
           <div style={{ background: T.purpleBg, borderRadius: '8px', padding: '12px 16px', flex: 1, border: `1.5px solid ${T.purpleBorder}` }}>
             <div style={{ fontSize: '10px', color: T.purpleLabel, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>Charity Fund (Season)</div>
             <div style={{ fontSize: '20px', fontWeight: 500, color: T.mainColor, fontFamily: "'DM Mono', monospace" }}>${data.charityBalance.toFixed(2)}</div>
-            <div style={{ fontSize: '10px', color: T.subColor, marginTop: '2px' }}>SFGGCI 2027</div>
+            <div style={{ fontSize: '10px', color: T.subColor, marginTop: '2px' }}>{data.charityName || ''}</div>
           </div>
           <div style={{ background: T.tealBg, borderRadius: '8px', padding: '12px 16px', flex: 1, border: `1.5px solid ${T.tealBorder}` }}>
             <div style={{ fontSize: '10px', color: T.tealLabel, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '4px' }}>Progressive Pot</div>
@@ -233,7 +233,7 @@ export default function ReportPage() {
 
         {/* Footer */}
         <div style={{ borderTop: `1px solid ${T.divider}`, paddingTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ fontSize: '10px', color: T.footerColor, textTransform: 'uppercase', letterSpacing: '1px' }}>Classic Bowling Center · San Francisco</div>
+          <div style={{ fontSize: '10px', color: T.footerColor, textTransform: 'uppercase', letterSpacing: '1px' }}>Classic Bowling Center · Daly City, CA</div>
           <div style={{ fontSize: '10px', color: T.footerColor }}>bowling-poker-manager.vercel.app</div>
         </div>
 

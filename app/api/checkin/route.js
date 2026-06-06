@@ -118,6 +118,14 @@ export async function POST(request) {
       const payoutTotal = Math.floor((pool - progressiveNightly) / 4) * 3;
       const charityNightly = pool - progressiveNightly - payoutTotal;
 
+      // Check for an additional donation this week
+      const [donationRow] = await sql`
+        SELECT amount FROM charitable_donations
+        WHERE season_id = ${seasonId} AND week_number = ${weekNumber}
+      `;
+      const donationAmount = donationRow ? parseFloat(donationRow.amount) : 0;
+      const totalCharityAmount = charityNightly + donationAmount;
+
       const [progRow] = await sql`SELECT balance_after FROM progressive_pot WHERE season_id = ${seasonId} ORDER BY id DESC LIMIT 1`;
       const progressiveBalance = progRow ? parseFloat(progRow.balance_after) : 0;
       const [charRow] = await sql`SELECT balance_after FROM charity_fund WHERE season_id = ${seasonId} ORDER BY id DESC LIMIT 1`;
@@ -126,10 +134,10 @@ export async function POST(request) {
       const newProgressiveBalance = progressiveBalance + progressiveNightly;
       await sql`INSERT INTO progressive_pot (season_id, week_number, transaction_type, amount, balance_after, notes) VALUES (${seasonId}, ${weekNumber}, 'lock', ${progressiveNightly}, ${newProgressiveBalance}, 'Night locked')`;
 
-      const newCharityBalance = charityBalance + charityNightly;
-      await sql`INSERT INTO charity_fund (season_id, week_number, transaction_type, amount, balance_after, notes) VALUES (${seasonId}, ${weekNumber}, 'lock', ${charityNightly}, ${newCharityBalance}, 'Night locked')`;
+      const newCharityBalance = charityBalance + totalCharityAmount;
+      await sql`INSERT INTO charity_fund (season_id, week_number, transaction_type, amount, balance_after, notes) VALUES (${seasonId}, ${weekNumber}, 'lock', ${totalCharityAmount}, ${newCharityBalance}, 'Night locked')`;
 
-      return NextResponse.json({ success: true, isLocked: true, newProgressiveBalance, newCharityBalance, pool, payoutTotal, charityNightly });
+      return NextResponse.json({ success: true, isLocked: true, newProgressiveBalance, newCharityBalance, pool, payoutTotal, charityNightly: totalCharityAmount });
 
     } else if (action === 'unlock') {
       await sql`DELETE FROM progressive_pot WHERE season_id = ${seasonId} AND week_number = ${weekNumber} AND transaction_type = 'lock'`;

@@ -8,7 +8,15 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `
+          try {
+            const t = localStorage.getItem('theme');
+            if (t === 'light') document.documentElement.classList.add('light-mode');
+          } catch(e) {}
+        ` }} />
+      </head>
       <body>
         <header style={{
           background: 'var(--surface)',

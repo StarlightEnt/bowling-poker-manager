@@ -27,7 +27,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const weekNumber = searchParams.get('week');
 
-    const [season] = await sql`SELECT id FROM seasons WHERE is_active = true LIMIT 1`;
+    const [season] = await sql`SELECT id, name, progressive_seed, charity_seed FROM seasons WHERE is_active = true LIMIT 1`;
     if (!season) return NextResponse.json({ error: 'No active season' }, { status: 404 });
 
     const settings = await sql`SELECT key, value FROM settings`;
@@ -65,11 +65,29 @@ export async function GET(request) {
     const lockRows = await sql`SELECT id FROM progressive_pot WHERE season_id = ${season.id} AND week_number = ${week} AND transaction_type = 'lock'`;
     const isLocked = lockRows.length > 0;
 
-    const [progRow] = await sql`SELECT balance_after FROM progressive_pot WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1`;
-    const progressiveBalance = progRow ? parseFloat(progRow.balance_after) : 0;
+    // True progressive balance: seed + COUNT(historical weeks)*nightly + last live entry
+    const [histProgRow] = await sql`
+      SELECT COUNT(*)::int AS weeks FROM historical_checkins WHERE season_name = ${season.name}
+    `;
+    const [liveProgRow] = await sql`
+      SELECT balance_after FROM progressive_pot WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1
+    `;
+    const progressiveBalance =
+      parseFloat(season.progressive_seed) +
+      parseInt(histProgRow.weeks) * progressiveNightly +
+      (liveProgRow ? parseFloat(liveProgRow.balance_after) : 0);
 
-    const [charRow] = await sql`SELECT balance_after FROM charity_fund WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1`;
-    const charityBalance = charRow ? parseFloat(charRow.balance_after) : 0;
+    // True charity balance: seed + SUM(historical charity amounts) + last live entry
+    const [histCharityRow] = await sql`
+      SELECT COALESCE(SUM(charity_amount), 0) AS total FROM historical_checkins WHERE season_name = ${season.name}
+    `;
+    const [liveCharityRow] = await sql`
+      SELECT balance_after FROM charity_fund WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1
+    `;
+    const charityBalance =
+      parseFloat(season.charity_seed) +
+      parseFloat(histCharityRow.total) +
+      (liveCharityRow ? parseFloat(liveCharityRow.balance_after) : 0);
 
     const results = await sql`
       SELECT gr.*, b.normalized_name, b.full_name
@@ -81,6 +99,12 @@ export async function GET(request) {
 
     const progressiveWonRow = await sql`SELECT id FROM game_results WHERE season_id = ${season.id} AND week_number = ${week} AND is_progressive_win = true LIMIT 1`;
     const progressiveAlreadyWon = progressiveWonRow.length > 0;
+
+    // Current week's donation (if any)
+    const [donationRow] = await sql`
+      SELECT id, amount, notes FROM charitable_donations
+      WHERE season_id = ${season.id} AND week_number = ${week}
+    `;
 
     const weeks = await sql`SELECT week_number, bowl_date FROM schedule WHERE season_id = ${season.id} AND is_position_round = false ORDER BY week_number ASC`;
 
@@ -100,6 +124,7 @@ export async function GET(request) {
       isLocked,
       progressiveAlreadyWon,
       results,
+      donation: donationRow ? { id: donationRow.id, amount: parseFloat(donationRow.amount), notes: donationRow.notes || '' } : null,
       weeks,
       cfg: { buyinAmount, progressiveNightly },
     });

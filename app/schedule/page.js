@@ -148,7 +148,7 @@ export default function SchedulePage() {
         Schedule
       </h1>
       <p style={{ color: '#555', fontSize: 11, margin: '0 0 20px' }}>
-        {seasonName} &nbsp;·&nbsp; {weeks.length} weeks &nbsp;·&nbsp; Classic Bowling Center, San Francisco
+        {seasonName} &nbsp;·&nbsp; {weeks.length} weeks &nbsp;·&nbsp; Classic Bowling Center, Daly City, CA
       </p>
 
       {/* Table */}

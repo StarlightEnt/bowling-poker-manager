@@ -27,7 +27,7 @@ const S = {
     fontSize: '13px', fontFamily: "'DM Mono', monospace", outline: 'none', cursor: 'pointer',
   },
 
-  // Payout card - subtle, not jarring
+  // Payout card
   payoutCard: {
     background: 'var(--surface)',
     border: '1px solid rgba(232,255,71,0.3)',
@@ -117,7 +117,7 @@ const S = {
     letterSpacing: '1px', marginTop: '3px',
   },
 
-  // Game entry cards — toned down
+  // Game entry cards
   gameCard: {
     background: 'var(--surface)', border: '1px solid var(--border)',
     borderRadius: '8px', padding: '20px 24px', marginBottom: '12px',
@@ -170,16 +170,6 @@ const S = {
   btnRemove: {
     background: 'transparent', color: 'var(--muted)',
     border: 'none', fontSize: '16px', cursor: 'pointer', padding: '0 4px',
-  },
-  progressiveToggle: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    cursor: 'pointer', userSelect: 'none',
-    color: 'var(--muted)', fontSize: '12px',
-  },
-  progressiveToggleOn: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    cursor: 'pointer', userSelect: 'none',
-    color: 'var(--accent)', fontSize: '12px', fontWeight: 'bold',
   },
 
   // Autocomplete
@@ -281,6 +271,189 @@ function WinnerAutocomplete({ checkedIn, value, onChange, onSelect, placeholder 
   );
 }
 
+function DonationCard({ seasonId, weekNumber, initialDonation, isLocked, onRelockSuccess }) {
+  const [amount, setAmount]   = useState(initialDonation ? String(initialDonation.amount) : '');
+  const [notes, setNotes]     = useState(initialDonation ? initialDonation.notes : '');
+  const [saving, setSaving]   = useState(false);
+  const [msg, setMsg]         = useState('');
+
+  // Sync if parent reloads (week change)
+  useEffect(() => {
+    setAmount(initialDonation ? String(initialDonation.amount) : '');
+    setNotes(initialDonation ? initialDonation.notes : '');
+    setMsg('');
+  }, [weekNumber, initialDonation]);
+
+  function flashMsg(text) {
+    setMsg(text);
+    setTimeout(() => setMsg(''), 2000);
+  }
+
+  async function handleSave() {
+    const parsedAmount = parseFloat(amount);
+    if (!parsedAmount || parsedAmount <= 0) {
+      setMsg('Enter an amount greater than $0');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/gamenight/donation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seasonId, weekNumber, amount: parsedAmount, notes }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+
+      if (isLocked) {
+        const relock = await fetch('/api/gamenight/donation/relock-charity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seasonId, weekNumber }),
+        }).then(r => r.json());
+        if (relock.success) onRelockSuccess(relock.charityBalance);
+      }
+
+      flashMsg('Saved ✓');
+    } catch (e) {
+      setMsg('Error: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleClear() {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/gamenight/donation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seasonId, weekNumber, amount: 0, notes: '' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Clear failed');
+      setAmount('');
+      setNotes('');
+
+      if (isLocked) {
+        const relock = await fetch('/api/gamenight/donation/relock-charity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ seasonId, weekNumber }),
+        }).then(r => r.json());
+        if (relock.success) onRelockSuccess(relock.charityBalance);
+      }
+
+      flashMsg('Cleared');
+    } catch (e) {
+      setMsg('Error: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const msgIsError = msg.startsWith('Error') || msg.startsWith('Enter');
+  const msgIsSuccess = msg === 'Saved ✓';
+
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: '8px',
+      padding: '20px 24px',
+      marginBottom: '12px',
+    }}>
+      <div style={{
+        fontFamily: "'Bebas Neue', sans-serif",
+        fontSize: '20px', letterSpacing: '2px',
+        color: 'var(--accent2)', marginBottom: '14px',
+      }}>
+        Additional Donation
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Dollar amount */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ color: 'var(--muted)', fontSize: '13px' }}>$</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            placeholder="0.00"
+            style={{
+              background: 'var(--surface2)', border: '1px solid var(--border)',
+              borderRadius: '4px', color: 'var(--text)', padding: '9px 10px',
+              fontSize: '13px', outline: 'none', width: '110px',
+              fontFamily: "'DM Mono', monospace",
+            }}
+          />
+        </div>
+
+        {/* Notes */}
+        <input
+          type="text"
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="e.g. Joe K donated from winnings"
+          style={{
+            background: 'var(--surface2)', border: '1px solid var(--border)',
+            borderRadius: '4px', color: 'var(--text)', padding: '9px 12px',
+            fontSize: '12px', outline: 'none', flex: '1', minWidth: '200px',
+            fontFamily: "'DM Mono', monospace",
+          }}
+        />
+
+        {/* Save */}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          style={{
+            background: saving ? 'var(--border)' : 'var(--accent)',
+            color: saving ? 'var(--muted)' : 'var(--bg)',
+            border: 'none', padding: '9px 20px', borderRadius: '4px',
+            fontFamily: "'Bebas Neue', sans-serif", fontSize: '15px',
+            letterSpacing: '1px', cursor: saving ? 'default' : 'pointer',
+          }}
+        >
+          {saving ? '…' : 'Save'}
+        </button>
+
+        {/* Clear */}
+        <button
+          onClick={handleClear}
+          disabled={saving}
+          style={{
+            background: 'transparent', color: 'var(--muted)',
+            border: '1px solid var(--border)', padding: '9px 16px', borderRadius: '4px',
+            fontFamily: "'Bebas Neue', sans-serif", fontSize: '15px',
+            letterSpacing: '1px', cursor: saving ? 'default' : 'pointer',
+          }}
+        >
+          Clear
+        </button>
+      </div>
+
+      {/* Status message */}
+      {msg && (
+        <div style={{
+          marginTop: '8px', fontSize: '11px',
+          color: msgIsError ? 'var(--red)' : msgIsSuccess ? 'var(--green)' : 'var(--muted)',
+        }}>
+          {msg}
+        </div>
+      )}
+
+      <div style={{ marginTop: '8px', fontSize: '10px', color: 'var(--muted)' }}>
+        {isLocked
+          ? 'Night is locked — charity total updated immediately.'
+          : 'This amount will be included in the charity total when the night is locked.'}
+      </div>
+    </div>
+  );
+}
+
 function GameEntry({ gameNum, checkedIn, perGame, progressiveBalance, onSave, existingResults }) {
   const [winners, setWinners] = useState([{ bowlerId: null, name: '', query: '' }]);
   const [handType, setHandType] = useState('');
@@ -289,7 +462,6 @@ function GameEntry({ gameNum, checkedIn, perGame, progressiveBalance, onSave, ex
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Load existing results
   useEffect(() => {
     const gameResults = existingResults.filter(r => r.game_number === gameNum);
     if (gameResults.length > 0) {
@@ -372,7 +544,6 @@ function GameEntry({ gameNum, checkedIn, perGame, progressiveBalance, onSave, ex
         </div>
       </div>
 
-      {/* Winners */}
       <div style={{ marginBottom: '12px' }}>
         <label style={S.label}>Winner{winners.length > 1 ? 's' : ''} {winnerCount > 1 && <span style={{ color: 'var(--accent2)' }}>(split: ${splitPayout.toFixed(2)} each)</span>}</label>
         {winners.map((w, i) => (
@@ -392,7 +563,6 @@ function GameEntry({ gameNum, checkedIn, perGame, progressiveBalance, onSave, ex
         <button style={S.btnAddWinner} onClick={addWinner}>+ Add another winner (tie)</button>
       </div>
 
-      {/* Hand type */}
       <div style={S.formRow}>
         <div>
           <label style={S.label}>Poker Hand</label>
@@ -417,7 +587,6 @@ function GameEntry({ gameNum, checkedIn, perGame, progressiveBalance, onSave, ex
         </div>
       </div>
 
-      {/* Progressive indicator - auto set, not manually togglable */}
       <div style={{ marginBottom: '16px' }}>
         {handType === 'Royal Flush' ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent2)', fontSize: '13px', fontWeight: 'bold' }}>
@@ -503,7 +672,6 @@ export default function GameNightPage() {
     });
     const result = await res.json();
     if (result.success) {
-      // Reload to get updated results and balances
       const url = `/api/gamenight?week=${data.week}`;
       const updated = await fetch(url).then(r => r.json());
       setData(updated);
@@ -533,7 +701,6 @@ export default function GameNightPage() {
     ? new Date(data.scheduleRow.bowl_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
     : '';
 
-  // Build payout summary rows
   const gameRows = [1, 2, 3].map(g => {
     const results = data.results.filter(r => r.game_number === g);
     return {
@@ -630,7 +797,7 @@ export default function GameNightPage() {
           </tbody>
         </table>
 
-        {/* Running totals - progressive and charity only */}
+        {/* Running totals */}
         <div style={S.totalsRow}>
           <div style={S.totalChip}>
             <div style={{ ...S.totalChipVal, color: 'var(--accent2)' }}>${progressiveBalance.toFixed(2)}</div>
@@ -642,6 +809,15 @@ export default function GameNightPage() {
           </div>
         </div>
       </div>
+
+      {/* Additional Donation Card */}
+      <DonationCard
+        seasonId={data.seasonId}
+        weekNumber={data.week}
+        initialDonation={data.donation}
+        isLocked={data.isLocked}
+        onRelockSuccess={newBal => setCharityBalance(newBal)}
+      />
 
       {/* Game entry slots */}
       {[1, 2, 3].map(g => (
