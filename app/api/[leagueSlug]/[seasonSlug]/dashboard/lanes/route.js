@@ -1,5 +1,7 @@
 import sql from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 async function detectWeek(seasonId) {
   const today = new Date().toISOString().split('T')[0];
 

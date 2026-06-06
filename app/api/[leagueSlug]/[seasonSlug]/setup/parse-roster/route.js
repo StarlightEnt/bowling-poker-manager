@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { parseRosterPDF } from '@/lib/pdfParser';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request) {
   try {
     const formData = await request.formData();

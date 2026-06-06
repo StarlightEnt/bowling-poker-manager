@@ -30,6 +30,18 @@ export default function LeaguePickerPage() {
       </div>
 
       <div style={{ marginBottom: 32 }}>
+        {loading && (
+          <div style={{
+            background: '#141417',
+            border: '1px solid #222',
+            borderRadius: 6,
+            padding: '18px 24px',
+            marginBottom: 10,
+            opacity: 0.4,
+            height: 72,
+            animation: 'pulse 1.5s ease-in-out infinite',
+          }} />
+        )}
         {leagues.map(league => (
           <div key={league.id}
             onClick={() => router.push(`/${league.slug}`)}

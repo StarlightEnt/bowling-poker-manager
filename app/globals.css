@@ -39,6 +39,11 @@ input, select, textarea { font-family: 'DM Mono', monospace; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
 /* Light mode stub — full polish is a future task */
 html.light-mode {
   --bg: #f5f5f5;

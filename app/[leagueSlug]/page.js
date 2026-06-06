@@ -14,7 +14,20 @@ export default function SeasonPickerPage({ params }) {
       .catch(() => {});
   }, [leagueSlug]);
 
-  if (!data || !data.league) return <div style={{ padding: 40, color: '#555', fontFamily: 'monospace' }}>Loading...</div>;
+  if (!data || !data.league) return (
+    <div style={{ padding: '28px 32px' }}>
+      <div style={{
+        background: '#141417',
+        border: '1px solid #222',
+        borderRadius: 6,
+        padding: '18px 24px',
+        marginBottom: 10,
+        opacity: 0.4,
+        height: 72,
+        animation: 'pulse 1.5s ease-in-out infinite',
+      }} />
+    </div>
+  );
 
   const { league, seasons } = data;
 

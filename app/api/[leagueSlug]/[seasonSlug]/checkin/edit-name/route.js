@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
 import { normalizeName } from '@/lib/pdfParser';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(request) {
   try {
     const { bowlerId, fullName } = await request.json();
