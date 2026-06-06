@@ -2,7 +2,7 @@
 
 A web app for managing a poker side-game played during bowling league nights. Built for the LGBT Wednesday Community League in Daly City, CA — and designed to be licensed to any bowling league.
 
-Players pay a weekly buy-in, draw cards for spares and strikes during three games of bowling, and the best legal 5-card poker hand wins each game. The app handles check-in, payouts, game recording, weekly reports, and season financials.
+Players pay a weekly buy-in, draw cards for spares and strikes during three games of bowling, and the best legal 5-card poker hand wins each game. A portion of each week's pool is donated to a designated charity — making this a charitable fundraising game, not gambling. The app handles check-in, payouts, game recording, weekly reports, and season financials.
 
 **Live app:** [bowling-poker-manager.vercel.app](https://bowling-poker-manager.vercel.app)
 
@@ -129,7 +129,7 @@ Example: `/LGBTWedCom/Sum26/checkin`
 Each week players pay a **$5 buy-in**. The pot is split as follows:
 
 - **$3** goes to the progressive pot (carries over until a Royal Flush is hit)
-- The remaining pool is divided: **75% paid out** across 3 games, **25% to charity**
+- The remaining pool is divided: **75% paid out** across 3 games, **25% donated to a designated charity** — this charitable component is what distinguishes the game from gambling
 - During bowling, players draw cards for **spares** (1 card) and **strikes** (2 cards)
 - At the end of each game, the best legal 5-card poker hand wins that game's payout
 
