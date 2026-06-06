@@ -1,64 +1,51 @@
-# Bowling Poker Manager — Project Summary
-*As of June 6, 2026 (end of session)*
-
-## How We Work Together
-- Discuss and agree on approach BEFORE writing any code
-- **Present the plan/summary first — STOP and wait for explicit "go ahead" confirmation before writing any code**
-- Work one step at a time — wait for confirmation/acknowledgement before proceeding
-- Always deliver complete downloadable files — NEVER ask the user to make surgical edits
-- Always specify full file paths when providing files to update
-- Be clear about whether a file is NEW or a REPLACEMENT
-- Always remind to restart the server after ANY file changes
-- Before presenting any file that goes into a NEW folder, provide the PowerShell `mkdir` command first
-- Be accurate — never claim something is done unless it is verified
-
-## Security Rules
-- NEVER suggest putting credentials, tokens, or secrets in chat or in git
-- `.env.local` is always created manually on each machine, never committed
-- If credentials are accidentally exposed, rotate them immediately in Neon console
+# Bowling Poker Manager — Technical Reference
+*Last updated: June 6, 2026*
 
 ---
 
-## Project Overview
-A web app replacing a manual Excel spreadsheet to manage a poker side-game during the
-LGBT Wednesday Community bowling league at Classic Bowling Center, Daly City, CA.
-Players pay $5 buy-in, draw cards for spares/strikes during 3 bowling games, and best
-5-card poker hand wins each game.
+## Overview
 
-Built to be sold/licensed to other leagues — must be robust, multi-season, multi-league capable.
+A Next.js 14 web app managing a charitable poker side-game played during bowling league nights. Players pay a weekly buy-in, draw cards for spares and strikes across three games, and the best legal 5-card poker hand wins each game's payout. A portion of each pool goes to a designated charity. Built for a local bowling league in the San Francisco Bay Area — architected for multi-league, multi-season licensing.
+
+**Live:** [bowling-poker-manager.vercel.app](https://bowling-poker-manager.vercel.app)
+
+**GitHub:** [StarlightEnt/bowling-poker-manager](https://github.com/StarlightEnt/bowling-poker-manager)
 
 ---
 
 ## Tech Stack
-- **Frontend**: Next.js 14 (JavaScript, App Router)
-- **Database**: Neon (PostgreSQL) — project: `bowling-poker-manager`
-- **Hosting**: Vercel — auto-deploy from GitHub
-- **GitHub**: `StarlightEnt/bowling-poker-manager`
-- **PDF Parsing**: `pdf-parse@1.1.1` (via `pdf-parse/lib/pdf-parse.js`)
-- **Image Export**: `html-to-image`
 
-## Dev Environments
-- **Home Windows**: `C:\Users\allis\DevProjects\bowling-poker-manager` — Node 24.16.0 ✅
-- **Work Windows**: `D:\users\allis\DevProjects\bowling-poker-manager` — Node 24.16.0 ✅
-- **Mac (M2)**: `/Users/alaureano/DevProjects/bowling-poker-manager` — Node 24.16.0 via nvm ✅
-- **Port**: 3005 (`next dev -p 3005`)
-- **Env file**: `.env.local` with `DATABASE_URL` (gitignored, never committed)
-
-### Node Version Management
-- **Node version**: 24.16.0 (pinned via `.nvmrc`) — all three machines match
-- **Mac**: uses `nvm` — run `nvm use` in project folder to activate
-- **Windows**: Node installed directly at 24.16.0
-
-### Environment Setup (new machine checklist)
-1. Clone repo: `git clone https://github.com/StarlightEnt/bowling-poker-manager.git`
-2. Mac only: `nvm install 24`, `nvm use 24`
-3. `npm install`
-4. Create `.env.local` manually with `DATABASE_URL=<Neon connection string>`
-5. `npm run dev` — starts on port 3005
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 14, App Router, JavaScript |
+| Database | Neon (PostgreSQL) |
+| Hosting | Vercel (auto-deploy from `main`) |
+| PDF Parsing | `pdf-parse@1.1.1` via `pdf-parse/lib/pdf-parse.js` |
+| Image Export | `html-to-image` |
+| Fonts | Bebas Neue (headers), DM Mono (data/body) |
 
 ---
 
-## URL Structure (v2 — slug-based routing)
+## Requirements & Local Setup
+
+- **Node.js:** 24.16.0 (pinned via `.nvmrc` — use nvm on Mac/Linux)
+- **Database:** Neon PostgreSQL (free tier sufficient)
+- **Port:** 3005 (`next dev -p 3005`)
+
+```bash
+git clone https://github.com/StarlightEnt/bowling-poker-manager.git
+cd bowling-poker-manager
+nvm use          # Mac/Linux only — activates Node 24.16.0
+npm install
+echo "DATABASE_URL=your_neon_connection_string" > .env.local
+npm run dev
+```
+
+---
+
+## URL Structure
+
+Slug-based routing — no numeric IDs in URLs.
 
 ```
 /                                    ← League picker
@@ -75,103 +62,198 @@ Built to be sold/licensed to other leagues — must be robust, multi-season, mul
 /[leagueSlug]/[seasonSlug]/setup
 ```
 
-Current live example:
-- `/LGBTWedCom/Sum26/checkin`
+**Current live example:** `/AcmBow/Sum26/checkin`
 
 ### Slug Rules
-- **League slug**: first 3 letters of each word — `LGBT Wednesday Community` → `LGBTWedCom`
-- **Season slug**: abbreviation + year — `Summer '26` → `Sum26`, `Fall/Winter '26-'27` → `FW2627`
-- Span seasons: `WS` (Winter/Spring), `SS` (Spring/Summer), `SF` (Summer/Fall), `FW` (Fall/Winter)
-- Both auto-generated but user-editable before saving
+- **League:** first 3 chars of each word → `Acme Bowling League` → `AcmBowLea`
+- **Season:** abbreviation + year(s):
+  - Single: `Sum26`, `Fal26`, `Win26`, `Spr26`
+  - Span: `WS26` (Winter/Spring), `SS26` (Spring/Summer), `SF26` (Summer/Fall), `FW2627` (Fall/Winter)
+- Both auto-generated from name but user-editable before saving
 
 ---
 
-## Database Schema (post-migration-v2)
+## Database Schema
 
 ```sql
 leagues        (id, name, slug, venue_name, venue_city, venue_state,
                 charity_name, accent_color, created_at)
-seasons        (id, name, slug, league_id, start_date, end_date, is_active,
-                created_at, charity_seed, progressive_seed)
-teams          (id, name)                          ← league-wide permanent
+
+seasons        (id, name, slug, league_id, start_date, end_date,
+                start_year, is_active, created_at,
+                charity_seed, progressive_seed)
+
+teams          (id, name)                        ← league-wide permanent
+
 season_teams   (id, season_id, team_id, team_number)
-bowlers        (id, full_name, normalized_name, imported_name, email, is_sub)
-season_roster  (id, season_id, team_id, bowler_id, position_order,
-                book_average, is_sub)
-schedule       (id, season_id, week_number, bowl_date, starting_lane,
-                lane_positions JSONB, is_position_round, notes)
-checkins       (id, season_id, week_number, bowler_id, paid_amount, checked_in_at)
-game_results   (id, season_id, week_number, game_number, bowler_id, hand_type,
-                hand_detail, is_progressive_win, total_payout, progressive_payout)
-progressive_pot(id, season_id, week_number, entry_type, amount, balance_after, notes)
-charity_fund   (id, season_id, week_number, entry_type, amount, balance_after, notes)
+
+bowlers        (id, full_name, normalized_name,
+                imported_name, email, is_sub)    ← league-wide permanent
+
+season_roster  (id, season_id, team_id, bowler_id,
+                position_order, book_average, is_sub)
+
+schedule       (id, season_id, week_number, bowl_date,
+                starting_lane, lane_positions JSONB,
+                is_position_round, notes)
+
+checkins       (id, season_id, week_number, bowler_id,
+                paid_amount, checked_in_at)
+
+game_results   (id, season_id, week_number, game_number,
+                bowler_id, hand_type, hand_detail,
+                is_progressive_win, total_payout, progressive_payout)
+
+progressive_pot(id, season_id, week_number, entry_type,
+                amount, balance_after, notes)
+
+charity_fund   (id, season_id, week_number, entry_type,
+                amount, balance_after, notes)
+
 charitable_donations (id, season_id, week_number, amount, notes)
-historical_checkins  (id, season_name TEXT, week_number, player_count,
-                      charity_amount, bowl_date)
-settings       (league_id, key, value)             ← composite PK
+
+historical_checkins  (id, season_name TEXT, week_number,
+                      player_count, charity_amount, bowl_date)
+
+settings       (league_id, key, value)           ← composite PK (league_id, key)
 ```
 
-### Key Query Patterns
-```sql
--- Resolve season from slugs (used in all API routes)
-SELECT s.id, s.league_id FROM seasons s
-JOIN leagues l ON l.id = s.league_id
-WHERE l.slug = ${leagueSlug} AND s.slug = ${seasonSlug}
-
--- Settings (league-scoped)
-SELECT key, value FROM settings WHERE league_id = ${leagueId}
-```
+### Key Schema Notes
+- `imported_name` on bowlers — immutable identity key, set once at insert, NEVER updated, used for PDF re-import matching
+- `historical_checkins` uses `season_name TEXT` not a foreign key — always query by name string, never by season_id
+- `settings` composite PK is `(league_id, key)` — never query by key alone
+- `lane_positions` is JSONB array of team_numbers e.g. `[5,7,4,12,2,10,1,9,6,8,3,11]`
+- `bowl_date` must be cast `::TEXT` in queries — Neon driver format breaks `new Date()`
+- All numeric columns from Neon return as strings — always wrap in `parseFloat()` / `parseInt()`
 
 ---
 
 ## Financial Formula
+
 ```
-Pool = playerCount × buyinAmount ($5)
-Progressive set-aside = $3/night (configurable in settings)
-Payout total = floor((Pool - 3) / 4) × 3
-Charity = Pool - 3 - Payout total
+Pool = playerCount × buyin_amount
+Progressive set-aside = progressive_nightly ($3 default, must divide by 3)
+Payout total = floor((Pool - progressive_nightly) / 4) × 3
+Charity = Pool - progressive_nightly - Payout total
 Per game = totals / 3
 ```
 
-### Financial Flow
+### Weekly Financial Flow
 1. **Check-in** → mark players paid
-2. **Optional: Add Donation** on Game Night before locking
-3. **Lock Night** → writes combined charity (pool + donation) to `charity_fund`;
-   writes progressive to `progressive_pot`
+2. **Optional donation** → add extra charity amount before locking
+3. **Lock Night** → writes ONE combined charity entry (pool formula + donation) to `charity_fund`; writes progressive to `progressive_pot`
 4. **Game Night** → record winners only; no ledger writes except Royal Flush
 5. **Royal Flush** → zeroes progressive pot (payout entry in `progressive_pot`)
 6. **Unlock** → reverses lock entries + clears game results (destructive)
-7. **Donation Save/Clear on locked night** → silent relock
+7. **Donation edit on locked night** → silent relock — replaces `charity_fund` entry for that week
 
-### Charity Running Total Formula
-```
+### Running Total Formulas
+```javascript
+// Charity
 running_charity =
   seasons.charity_seed
   + SUM(historical_checkins.charity_amount WHERE season_name = season.name)
-  + last charity_fund.balance_after (ORDER BY id DESC LIMIT 1)
-```
+  + last(charity_fund.balance_after ORDER BY id DESC)
 
-### Progressive Running Total Formula
-```
+// Progressive
 running_progressive =
   seasons.progressive_seed
-  + COUNT(historical_checkins rows WHERE season_name = season.name) × progressive_nightly
-  + last progressive_pot.balance_after (ORDER BY id DESC LIMIT 1)
+  + COUNT(historical_checkins WHERE season_name = season.name) × progressive_nightly
+  + last(progressive_pot.balance_after ORDER BY id DESC)
 ```
 
-### Seed Balances (Summer '26, season id=1)
-- `charity_seed` = **$253.00**
-- `progressive_seed` = **$9.00**
-- Verified totals end of Week 7: charity **$429.00**, progressive **$30.00**
+**Never** add `charitable_donations` separately to running totals — donations are already folded into `charity_fund` entries at lock time.
+
+---
+
+## API Patterns
+
+### Season Resolution (all scoped routes)
+```javascript
+export const dynamic = 'force-dynamic';
+
+const url = new URL(request.url);
+const parts = url.pathname.split('/').filter(Boolean);
+const leagueSlug = parts[1];
+const seasonSlug = parts[2];
+
+const [season] = await sql`
+  SELECT s.id, s.league_id FROM seasons s
+  JOIN leagues l ON l.id = s.league_id
+  WHERE l.slug = ${leagueSlug} AND s.slug = ${seasonSlug}
+  LIMIT 1
+`;
+if (!season) return Response.json({ error: 'Season not found' }, { status: 404 });
+const sid = season.id;
+```
+
+### Settings (league-scoped, not season-scoped)
+```javascript
+const settings = await sql`
+  SELECT key, value FROM settings WHERE league_id = ${season.league_id}
+`;
+```
+
+### Week Detection (day-agnostic)
+```javascript
+async function detectWeek(seasonId) {
+  const today = new Date().toISOString().split('T')[0];
+
+  // 1. Is today a bowling day for this season?
+  const [todayRow] = await sql`
+    SELECT week_number FROM schedule
+    WHERE season_id = ${seasonId} AND bowl_date::TEXT = ${today}
+  `;
+  if (todayRow) return todayRow.week_number;
+
+  // 2. Most recent past week with checkin or game activity
+  const [recentRow] = await sql`
+    SELECT s.week_number FROM schedule s
+    WHERE s.season_id = ${seasonId}
+      AND s.bowl_date::TEXT <= ${today}
+      AND (
+        EXISTS (SELECT 1 FROM checkins c
+          WHERE c.season_id = s.season_id AND c.week_number = s.week_number)
+        OR EXISTS (SELECT 1 FROM game_results g
+          WHERE g.season_id = s.season_id AND g.week_number = s.week_number)
+      )
+    ORDER BY s.bowl_date DESC LIMIT 1
+  `;
+  if (recentRow) return recentRow.week_number;
+
+  // 3. Next upcoming non-position-round week
+  const [upcomingRow] = await sql`
+    SELECT week_number FROM schedule
+    WHERE season_id = ${seasonId}
+      AND bowl_date::TEXT >= ${today}
+      AND is_position_round = false
+    ORDER BY bowl_date ASC LIMIT 1
+  `;
+  return upcomingRow?.week_number || null;
+}
+```
+
+Never hardcode day-of-week numbers. `bowl_date` in the schedule table is the source of truth for when a league bowls.
+
+### Schedule Date Year Logic
+PDF schedule dates are MM/DD only. Use `seasons.start_year` as authoritative year:
+```javascript
+const baseYear = startYear || new Date().getFullYear();
+const firstMm = parseInt(weeks[0].bowl_date_str.split('/')[0]);
+const [mm, dd] = week.bowl_date_str.split('/').map(Number);
+const year = mm >= firstMm ? baseYear : baseYear + 1;
+bowlDate = `${year}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+```
 
 ---
 
 ## File Structure
+
 ```
 bowling-poker-manager/
 ├── app/
-│   ├── globals.css
-│   ├── layout.js                          ← uses NavBar component
+│   ├── globals.css                        ← CSS variables + light mode stub
+│   ├── layout.js                          ← Root layout, uses NavBar
 │   ├── page.js                            ← League picker
 │   ├── new-league/page.js                 ← New league setup form
 │   ├── components/
@@ -190,7 +272,7 @@ bowling-poker-manager/
 │           └── setup/page.js
 ├── app/api/
 │   ├── leagues/route.js                   ← GET all leagues
-│   ├── leagues/[leagueSlug]/route.js      ← GET one league + seasons
+│   ├── leagues/[leagueSlug]/route.js      ← GET league + seasons
 │   ├── leagues/new/route.js               ← POST create league
 │   └── [leagueSlug]/[seasonSlug]/
 │       ├── dashboard/route.js
@@ -212,210 +294,82 @@ bowling-poker-manager/
 │           ├── parse-schedule/route.js
 │           └── save-season/route.js
 ├── lib/
-│   ├── db.js
-│   └── pdfParser.js
-├── migration-v2.sql                       ← already run
-├── migration-history.sql                  ← already run
-├── .nvmrc
+│   ├── db.js                              ← Neon connection
+│   └── pdfParser.js                       ← parseRosterPDF(), parseSchedulePDF()
+├── migrations/                            ← DB migration scripts + README
+├── CLAUDE.md                              ← Permanent Claude Code instructions
+├── .nvmrc                                 ← Node 24.16.0
 ├── .npmrc
 ├── next.config.js
 ├── vercel.json
-├── package.json                           ← dev port 3005
-└── .env.local                             ← DATABASE_URL (gitignored)
+└── package.json                           ← dev port 3005
 ```
 
 ---
 
-## NavBar Component (`app/components/NavBar.js`)
-
-Client Component. Uses `usePathname()` to detect route context.
-
-- **On `/` and `/new-league`**: shows app title only, no nav links
-- **On `/[leagueSlug]`**: shows app title only, no nav links
-- **On `/[leagueSlug]/[seasonSlug]/*`**: shows full nav links + context bar
-
-### Context bar (shown inside league+season):
-```
-         LGBT Wednesday Community · Summer '26        [LEAGUES]
-```
-- Centered text, 10px DM Mono, color #555
-- `[LEAGUES]` button: position absolute right, 9px, border 1px solid #333,
-  onClick → router.push('/')
-- Fetches league/season names from `/api/leagues/[leagueSlug]`
-
-### Session persistence (localStorage):
-- **Writes** `lastLeagueSlug` + `lastSeasonSlug` whenever inside a league+season route
-- **Read** on league picker page to show `● last session` badge on matching league card
-- Badge color: league's accent_color, 9px DM Mono, above season count
-
-### Nav links (scoped to current league+season):
-```javascript
-`/${leagueSlug}/${seasonSlug}`           // Dashboard
-`/${leagueSlug}/${seasonSlug}/checkin`
-`/${leagueSlug}/${seasonSlug}/gamenight`
-`/${leagueSlug}/${seasonSlug}/report`
-`/${leagueSlug}/${seasonSlug}/schedule`
-`/${leagueSlug}/${seasonSlug}/roster`
-`/${leagueSlug}/${seasonSlug}/history`
-`/${leagueSlug}/${seasonSlug}/settings`
-```
-
----
-
-## Screens — Completed ✅
+## Screen Reference
 
 ### League Picker (`/`)
-- Full-width league cards: left accent border (league.accent_color), name + venue,
-  season count right-justified
-- `● last session` badge on last-used league card (from localStorage)
-- Rainbow-border "Set Up New League" compact card
-- Fetches from `GET /api/leagues`
+Full-width league cards with left accent border. `● last session` badge on last-used league (localStorage). Rainbow-border "Set Up New League" card. Fetches `GET /api/leagues`.
 
 ### Season Picker (`/[leagueSlug]`)
-- Breadcrumb showing league name + venue
-- Full-width season cards: active gets accent border + yellow `● Active`,
-  complete gets dim border + gray "Complete"
-- Season name (Bebas Neue), weeks + date range underneath
-- Rainbow-border "Set Up New Season" card → links to setup page
-- Fetches from `GET /api/leagues/[leagueSlug]`
+Breadcrumb showing league + venue. Season cards with active/complete status. Start/end dates derived from schedule on import. Rainbow-border "Set Up New Season" card. Fetches `GET /api/leagues/[leagueSlug]`.
 
 ### New League Setup (`/new-league`)
-- Two equal `1fr 1fr` cards: League Identity + Game Rules
-- League Identity: name, slug (auto-generated, editable), venue, city, state,
-  charity name, accent color swatches + hex input, live preview bar
-- Game Rules: buy-in, progressive nightly (÷3 validated), live payout preview
-- Full-width save row: yellow Save button + inline status box
-- On save → POST `/api/leagues/new` → redirect to `/{slug}`
-- Yellow bold labels (`#e8ff47`), dark inputs
+Two equal cards: League Identity (name, slug, venue, city, state, charity, accent color swatches + hex, live preview bar) + Game Rules (buy-in, progressive nightly with ÷3 validation, live payout preview). Full-width save row. POSTs to `/api/leagues/new`.
 
 ### Dashboard (`/[leagueSlug]/[seasonSlug]`)
-- Season name from DB
-- Current week banner: week number, date, status, checked-in count, pool,
-  progressive, charity, games entered
-- Week detection looks BACKWARD (last Wed before next Wed)
-- Season progress bar: counts `game_results` game 3 OR `historical_checkins` as complete
-- Nav cards: Check-In, Game Night, Report, Schedule, History, Settings
-- Lane Graphic (two sections: current week + upcoming week)
-  - Responsive grid `repeat(auto-fill, minmax(150px, 1fr))`
-  - Deep blue-green cards (`#0d2a2a`), team names lavender `#c084fc`
-  - VACANT dimmed/italic, TBD placeholder if no lane_positions
+Current week banner (week, date, status, checkins, pool, progressive, charity, games). Season progress bar — counts `game_results` game 3 OR `historical_checkins` as complete. Nav cards. Lane Graphic (current + upcoming week, responsive `repeat(auto-fill, minmax(150px, 1fr))`).
 
-### Check-In (`/[leagueSlug]/[seasonSlug]/checkin`)
-- Auto-detects current week (backward-looking)
-- Week selector dropdown
-- 4-column alphabetical grid, tap to toggle
-- VACANT dimmed, non-tappable
-- Subs section below
-- Edit modal (✎) — edits full_name on permanent bowlers record
-- Lock Night / Unlock Night
+### Check-In (`/checkin`)
+Auto-detects current week (backward-looking). Week selector dropdown. 4-column alpha grid, tap to toggle. VACANT dimmed/non-tappable. Subs section below. Edit modal (✎) edits `bowlers.full_name`. Lock/Unlock Night.
 
-### Game Night (`/[leagueSlug]/[seasonSlug]/gamenight`)
-- Auto-detects current week
-- Zero-player guard
-- Payout Summary card
-- Additional Donation card (silent relock if night locked)
-- 3 game entry slots with winner autocomplete
-- Hand type dropdown + detail field
-- Progressive auto-ticks on Royal Flush
-- Tie split support
-- Running totals: Progressive Pot, Charity Fund
+### Game Night (`/gamenight`)
+Zero-player guard. Payout Summary card. Donation card (silent relock if night locked). 3 game slots with winner autocomplete, hand type dropdown, detail field. Progressive auto-ticks on Royal Flush. Tie split support.
 
-### Weekly Report (`/[leagueSlug]/[seasonSlug]/report`)
-- Auto-loads most recent completed week
-- Week selector
-- Dark/Light theme toggle
-- Pride-themed card with rainbow stripe
-- Charity name from `leagues.charity_name`
-- Download PNG (2x resolution)
+### Report (`/report`)
+Auto-loads most recent complete week. Week selector. Dark/Light toggle. Themed report card with rainbow stripe. Charity name from `leagues.charity_name`. Download PNG at 2x resolution.
 
-### Schedule (`/[leagueSlug]/[seasonSlug]/schedule`)
-- All 16 weeks with lane assignments
-- Edit starting_lane per week
-- Position round weeks editable
-- Current week highlighted (backward-looking)
+### Schedule (`/schedule`)
+All weeks with lane assignments. Edit starting_lane. Position round weeks editable. Current week highlighted.
 
-### Roster (`/[leagueSlug]/[seasonSlug]/roster`)
-- All teams for active season, one card per team
-- Columns: #, Full Name, Display Name, Avg, Email — all inline editable
-- Click Team Name in header to edit
-- VACANT rows dimmed but editable
-- Subs section at bottom
-- Collapsible Re-import PDF panel (non-destructive merge)
+### Roster (`/roster`)
+Teams as cards. Inline editable: Full Name, Display Name, Avg, Email, Team Name. VACANT dimmed but editable. Subs section. Collapsible Re-import PDF panel (non-destructive merge, matched on `imported_name`).
 
-### History (`/[leagueSlug]/[seasonSlug]/history`)
-- Season filter dropdown (newest first)
-- Summary card: weeks played, total games, total paid out, progressive wins
-- Charity raised → opens charity ledger drawer with running balance
-- Game log table (date descending), color-coded hand type badges
+### History (`/history`)
+Season filter. Summary card. Charity ledger drawer (clickable, running balance). Game log table (date descending, color-coded hand badges, progressive wins highlighted).
 
-### Settings (`/[leagueSlug]/[seasonSlug]/settings`)
-- League Identity: name, venue, city, state, charity name — editable
-- Game Rules: buy-in, progressive nightly (÷3 validated)
-- Season Seeds: charity_seed + progressive_seed with warning
-- Appearance: dark/light mode toggle (localStorage)
-- Danger Zone: Charity Payout + Season Setup link
+### Settings (`/settings`)
+League Identity, Game Rules, Season Seeds (with warning), Appearance (dark/light mode), Danger Zone (charity payout, season setup link).
 
-### Season Setup (`/[leagueSlug]/[seasonSlug]/setup`)
-- Upload League Standings PDF → imports teams, bowlers, subs
-- Upload Schedule PDF → imports 16-week lane assignments
-- Step 3: Season Name + Short Name/Slug (auto-generated, editable)
-- Access via Settings page (destructive operation)
+### Season Setup (`/setup`)
+Step 1: League Standings PDF → teams, bowlers, subs. Step 2: Schedule PDF → lane assignments. Step 3: Season Name, Short Name/Slug (auto-generated), Season Start Year (used for date math). Access via Settings only (destructive).
 
 ---
 
-## Screens — Not Yet Built ❌
+## NavBar Component
 
-None — all v1 screens complete. ✅
+Client Component (`'use client'`). Uses `usePathname()` to detect route context.
 
----
+- **On `/` and `/new-league`:** app title only, no nav links
+- **On `/[leagueSlug]`:** app title only, no nav links
+- **On `/[leagueSlug]/[seasonSlug]/*`:** full nav links + context bar
 
-## What's Left
+Context bar: `Acme Bowling League · Summer '26` (dynamically fetched from DB via `/api/leagues/[leagueSlug]`) centered, with `[LEAGUES]` button absolutely positioned right → `router.push('/')`.
 
-### Cleanup (v1)
-- Full light mode CSS polish (stub exists in globals.css)
-- Hardcoded strings audit (e.g. venue name in schedule/page.js)
-
-### V2 Backlog
-- Configurable team accent color in Settings
-  (currently hardcoded `#c084fc` in dashboard lane graphic)
-- Full light mode design pass
+**localStorage:**
+- Writes `lastLeagueSlug` + `lastSeasonSlug` on every league+season page load
+- League picker reads `lastLeagueSlug` to show `● last session` badge
+- `theme` key stores light/dark mode preference
 
 ---
 
-## Lane Graphic API (`/api/[leagueSlug]/[seasonSlug]/dashboard/lanes`)
-- Returns current week + next upcoming week (skips position rounds) in one call
-- `lane_positions` JSONB array of team_numbers `[5,7,4,12,...]`
-- Pairs: indices [0,1], [2,3], [4,5], [6,7], [8,9], [10,11]
-- team_number → `season_teams` → `teams` (name) → `season_roster` → `bowlers`
-  (normalized_name, sorted by position_order)
-- VACANT included, flagged `isVacant: true`
-- `hasPairs: false` → TBD placeholder
-- `bowl_date::TEXT` cast required — Neon driver breaks `new Date()` otherwise
-
----
-
-## New League API Routes
-
-### `GET /api/leagues`
-Returns all leagues with season_count. Used by league picker.
-
-### `GET /api/leagues/[leagueSlug]`
-Returns league + seasons array (newest first) with week_count.
-Used by season picker AND NavBar context fetch.
-
-### `POST /api/leagues/new`
-Creates league + settings rows. Validates slug uniqueness.
-Body: `{ name, slug, venue_name, venue_city, venue_state, charity_name,
-         accent_color, buyin_amount, progressive_nightly }`
-
----
-
-## PDF Parsing Details
+## PDF Parsing
 
 ### League Standings PDF (BLS software)
 - Page 2: Team Rosters
-  - Week 1 format: team header split across two lines, bowler data mashed
-  - Week 2+ format: team header single line, bowler data space-separated
+  - Week 1 format: team header split across two lines
+  - Week 2+ format: team header single line
 - Page 3: Temporary Substitutes
 - Page 4: Ignored
 - VACANT rows included as placeholder bowlers
@@ -423,86 +377,71 @@ Body: `{ name, slug, venue_name, venue_city, venue_state, charity_name,
 
 ### Schedule/Bylaws PDF
 - Lane assignments on last page
-- Format: `Wk07 06/03 5- 7 4- 12 2- 10 1- 9 6- 8 3- 11`
+- Format: `Wk01 04/22 5- 7 4- 12 2- 10 1- 9 6- 8 3- 11`
 - Week 12 split line handled by continuation join
 - Week 15 position round detection
 
 ### Name Normalization
-- Format: `First LastInitial` (e.g. `Mark B`)
+- Format: `First LastInitial` e.g. `Mark B`
 - Strips role suffixes: `-*`, `-Sec`, `-Tr`, `-Pres`, `-VP`
 - Skips generational suffixes: II, III, Jr, Sr
-- Subs get NO prefix — segregated by `is_sub` flag
-- `imported_name` stores original PDF name, NEVER modified after insert
+- Subs segregated by `is_sub` flag — no prefix
 
 ---
 
-## Key Notes / Gotchas
+## Lane Graphic API (`/api/[leagueSlug]/[seasonSlug]/dashboard/lanes`)
 
-1. **pdf-parse**: Must use `require('pdf-parse/lib/pdf-parse.js')` directly
-2. **Neon numeric columns**: Returned as strings — wrap in `parseFloat()` before math
-3. **Neon date columns**: Cast `bowl_date::TEXT` in queries
-4. **git**: `node_modules/`, `.next/`, `.env.local` all gitignored
-5. **Lock before Game Night**: Financial amounts locked at check-in time
-6. **Progressive pot**: Carries across weeks until Royal Flush
-7. **Mac nvm**: Run `nvm use` in project folder after opening new Terminal
-8. **Z- prefix REMOVED**: Subs no longer have Z- prefix
-9. **imported_name**: Immutable identity key — NEVER update after insert
-10. **Season setup is destructive**: access via Settings only
-11. **Schema refactor COMPLETE**: permanent bowler/team identity model is live
-12. **New folders**: Always provide PowerShell `mkdir` before new folder files
-13. **Season naming**: Always `Summer 'YY` — never `Summer 2026`
-14. **historical_checkins uses season_name TEXT**: query by name, never season_id
-15. **settings PK is composite**: `(league_id, key)` — not just `key`
-16. **charity_fund includes donations**: pool + donation = one combined entry at lock
-17. **Windows SSL for Node scripts**: `node --use-system-ca script.mjs`
-18. **Charity name**: `leagues.charity_name` = "SFGGCI 2027" — year is campaign year
-19. **API season resolution**: all routes use slug join pattern:
-    `JOIN leagues l ON l.id = s.league_id WHERE l.slug = X AND s.slug = Y`
-20. **NavBar is Client Component**: uses `usePathname()` — requires `'use client'`
-21. **localStorage**: used for lastLeagueSlug + lastSeasonSlug session persistence
-    and light/dark mode theme preference
+Returns current week + next upcoming week (skips position rounds) in one call.
+
+- `lane_positions` JSONB array of team_numbers: pairs at indices [0,1], [2,3], [4,5]...
+- team_number → `season_teams` → `teams` (name) → `season_roster` → `bowlers` (normalized_name, sorted by position_order)
+- VACANT included, flagged `isVacant: true`
+- `hasPairs: false` → TBD placeholder rendered on dashboard
 
 ---
 
-## Known Bugs
-- None outstanding as of June 6, 2026
+## Database Migrations
 
----
+Scripts live in `migrations/`. Always idempotent (`IF NOT EXISTS`). Run with:
+```powershell
+node --use-system-ca --env-file=.env.local migrations/FILENAME.mjs
+```
 
-## Current State (June 6, 2026 — end of session)
-- **V2 routing refactor COMPLETE** ✅
-- Slug-based URLs live: `/LGBTWedCom/Sum26/checkin` etc.
-- League picker, season picker, new league setup all built
-- Session persistence via localStorage (last session badge + LEAGUES button)
-- All v1 screens working under new routing
-- 1 league (id=1, slug=LGBTWedCom, accent=#3dffa0)
-- 1 season (id=1, slug=Sum26, league_id=1)
-- 12 permanent teams, 77 bowlers (52 regular + 25 subs)
-- Week 7 complete, Week 8 upcoming (Jun 10, 2026)
-- Build passes clean: `npm run build` ✅
+| Date | File | Description |
+|------|------|-------------|
+| 2026-06-06 | 20260606-add-season-start-year.mjs | Add start_year to seasons |
+| 2026-06-06 | 20260606-populate-season-dates.mjs | Derive start/end dates from schedule |
+| 2026-06-06 | 20260606-fix-summer26-schedule-dates.mjs | Fix initial season bowl_dates incorrect year assignment |
 
 ---
 
 ## Design System
-- **Background**: `#0d0d0f`
-- **Surface**: `#141417`
-- **Surface2**: `#1a1a1e`
-- **Accent**: `#e8ff47` (yellow)
-- **Accent2**: `#ff6b35` (orange)
-- **Green**: `#3dffa0`
-- **Blue**: `#4fa3ff`
-- **Red**: `#ff4444`
-- **Muted**: `#555`
-- **Border**: `#222`
-- **Fonts**: Bebas Neue (headers), DM Mono (data/body)
-- **Dark theme** throughout app
-- **Light mode**: stub CSS only — full polish is future task
-- **Report card**: Pride rainbow stripe + color-coded box borders
-- **Lane card bg**: `#0d2a2a` (deep blue-green)
-- **Lane card border**: `#1a4040`
-- **Lane team accent**: `#c084fc` (lavender — V2 configurable)
-- **League card**: full-width, left border in league accent_color
-- **Rainbow border**: gradient wrapper div `linear-gradient(135deg, #FF0018 0%,
-  #FFA52C 14%, #FFFF41 28%, #008018 42%, #0000F9 57%, #86007D 71%,
-  #FF0018 85%, #FFA52C 100%)` — used on setup cards
-- **Form labels**: `#e8ff47` bold uppercase 10px (new league setup style)
+
+| Token | Value |
+|-------|-------|
+| Background | `#0d0d0f` |
+| Surface | `#141417` |
+| Surface2 | `#1a1a1e` |
+| Accent yellow | `#e8ff47` |
+| Accent orange | `#ff6b35` |
+| Green | `#3dffa0` |
+| Blue | `#4fa3ff` |
+| Red | `#ff4444` |
+| Muted | `#555` |
+| Border | `#222` |
+| Lane card bg | `#0d2a2a` |
+| Lane card border | `#1a4040` |
+| Lane team accent | `#c084fc` (lavender — V2 configurable) |
+
+- Form labels: `#e8ff47` bold uppercase 10px letterSpacing 1px
+- Rainbow gradient: `linear-gradient(135deg, #FF0018 0%, #FFA52C 14%, #FFFF41 28%, #008018 42%, #0000F9 57%, #86007D 71%, #FF0018 85%, #FFA52C 100%)`
+- All styling via inline styles — no CSS framework
+- Dark theme throughout; light mode stub in `globals.css` (V2)
+
+---
+
+## Known Limitations / V2 Backlog
+
+- Light mode CSS is a stub only — full design pass needed
+- Lane team accent color (`#c084fc`) hardcoded — should be configurable per league in Settings
+- NavBar fetches league/season names on every page load — could be optimized with caching
