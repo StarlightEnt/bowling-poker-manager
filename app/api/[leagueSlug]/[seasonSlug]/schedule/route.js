@@ -1,35 +1,43 @@
 import sql from '@/lib/db';
 
 async function detectWeek(seasonId) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().split('T')[0];
+  const today = new Date().toISOString().split('T')[0];
 
-  if (today.getDay() === 3) {
-    const [todayRow] = await sql`
-      SELECT week_number FROM schedule
-      WHERE season_id = ${seasonId} AND bowl_date = ${todayStr}
-    `;
-    if (todayRow) return todayRow.week_number;
-  }
-
-  const [lastWeek] = await sql`
+  const [todayRow] = await sql`
     SELECT week_number FROM schedule
     WHERE season_id = ${seasonId}
-      AND bowl_date < ${todayStr}
-      AND is_position_round = false
-    ORDER BY bowl_date DESC LIMIT 1
+      AND bowl_date::TEXT = ${today}
   `;
-  if (lastWeek) return lastWeek.week_number;
+  if (todayRow) return todayRow.week_number;
 
-  const [upcoming] = await sql`
+  const [recentRow] = await sql`
+    SELECT s.week_number FROM schedule s
+    WHERE s.season_id = ${seasonId}
+      AND s.bowl_date::TEXT <= ${today}
+      AND (
+        EXISTS (
+          SELECT 1 FROM checkins c
+          WHERE c.season_id = s.season_id
+            AND c.week_number = s.week_number
+        )
+        OR EXISTS (
+          SELECT 1 FROM game_results g
+          WHERE g.season_id = s.season_id
+            AND g.week_number = s.week_number
+        )
+      )
+    ORDER BY s.bowl_date DESC LIMIT 1
+  `;
+  if (recentRow) return recentRow.week_number;
+
+  const [upcomingRow] = await sql`
     SELECT week_number FROM schedule
     WHERE season_id = ${seasonId}
-      AND bowl_date >= ${todayStr}
+      AND bowl_date::TEXT >= ${today}
       AND is_position_round = false
     ORDER BY bowl_date ASC LIMIT 1
   `;
-  return upcoming?.week_number || null;
+  return upcomingRow?.week_number || null;
 }
 
 export async function GET(request) {

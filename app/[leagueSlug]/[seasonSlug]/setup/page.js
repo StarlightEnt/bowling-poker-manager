@@ -308,6 +308,7 @@ export default function SetupPage({ params }) {
   const [scheduleData, setScheduleData] = useState(null);
   const [seasonName, setSeasonName] = useState('');
   const [seasonSlug, setSeasonSlug] = useState('');
+  const [startYear, setStartYear] = useState(new Date().getFullYear());
   const [rosterStatus, setRosterStatus] = useState(null);
   const [scheduleStatus, setScheduleStatus] = useState(null);
   const [saveStatus, setSaveStatus] = useState(null);
@@ -387,6 +388,7 @@ export default function SetupPage({ params }) {
         body: JSON.stringify({
           seasonName,
           seasonSlug,
+          startYear,
           teams: rosterData.teams,
           subs: rosterData.subs,
           weeks: scheduleData?.weeks || [],
@@ -529,6 +531,19 @@ export default function SetupPage({ params }) {
             placeholder="e.g. Sum26" />
           <div style={{ color: '#555', fontSize: 10, marginTop: -8, marginBottom: 12 }}>
             Used in the URL — letters and numbers only, no spaces
+          </div>
+          <label style={styles.label}>Season Start Year</label>
+          <input
+            style={styles.input}
+            type="number"
+            min="2020"
+            max="2050"
+            value={startYear}
+            onChange={e => setStartYear(parseInt(e.target.value))}
+            placeholder="2026"
+          />
+          <div style={{ color: '#555', fontSize: 10, marginTop: -8, marginBottom: 12 }}>
+            The calendar year the season begins — used for schedule date calculations
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginTop: '4px' }}>
             <div style={{ color: 'var(--muted)', fontSize: '11px' }}>

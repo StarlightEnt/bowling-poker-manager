@@ -7,7 +7,7 @@ export async function POST(request) {
     const parts = url.pathname.split('/').filter(Boolean);
     const leagueSlug = parts[1];
 
-    const { seasonName, seasonSlug, teams, subs, weeks } = await request.json();
+    const { seasonName, seasonSlug, startYear, teams, subs, weeks } = await request.json();
 
     if (!seasonName || !seasonSlug || !teams || teams.length === 0) {
       return NextResponse.json({ error: 'Missing required data' }, { status: 400 });
@@ -25,8 +25,8 @@ export async function POST(request) {
     await sql`UPDATE seasons SET is_active = false WHERE league_id = ${league.id} AND is_active = true`;
 
     const [season] = await sql`
-      INSERT INTO seasons (name, slug, league_id, is_active)
-      VALUES (${seasonName}, ${seasonSlug}, ${league.id}, true)
+      INSERT INTO seasons (name, slug, league_id, is_active, start_year)
+      VALUES (${seasonName}, ${seasonSlug}, ${league.id}, true, ${startYear || new Date().getFullYear()})
       RETURNING id
     `;
     const seasonId = season.id;
@@ -95,9 +95,11 @@ export async function POST(request) {
         let bowlDate = null;
         if (week.bowl_date_str) {
           const [mm, dd] = week.bowl_date_str.split('/').map(Number);
-          const now = new Date();
-          let year = now.getFullYear();
-          if (mm < now.getMonth() + 1) year++;
+          const baseYear = startYear || new Date().getFullYear();
+          const firstMm = weeks.length > 0
+            ? parseInt(weeks[0].bowl_date_str.split('/')[0])
+            : mm;
+          const year = mm >= firstMm ? baseYear : baseYear + 1;
           bowlDate = `${year}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
         }
 

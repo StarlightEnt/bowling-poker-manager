@@ -1,28 +1,44 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
 
-function getWeekCandidates() {
-  const today = new Date();
-  today.setHours(0,0,0,0);
-  const candidates = [];
-  if (today.getDay() === 3) candidates.push(new Date(today));
-  for (let i = 0; i <= 2; i++) {
-    const d = new Date(today);
-    const daysUntilWed = (3 - d.getDay() + 7) % 7 || 7;
-    d.setDate(d.getDate() + daysUntilWed + (i * 7));
-    candidates.push(d);
-  }
-  return candidates;
-}
-
 async function detectWeek(seasonId) {
-  for (const candidate of getWeekCandidates()) {
-    const dateStr = candidate.toISOString().split('T')[0];
-    const rows = await sql`SELECT week_number FROM schedule WHERE season_id = ${seasonId} AND bowl_date = ${dateStr}`;
-    if (rows.length > 0) return rows[0].week_number;
-  }
-  const [upcoming] = await sql`SELECT week_number FROM schedule WHERE season_id = ${seasonId} AND bowl_date >= CURRENT_DATE AND is_position_round = false ORDER BY bowl_date ASC LIMIT 1`;
-  return upcoming?.week_number || null;
+  const today = new Date().toISOString().split('T')[0];
+
+  const [todayRow] = await sql`
+    SELECT week_number FROM schedule
+    WHERE season_id = ${seasonId}
+      AND bowl_date::TEXT = ${today}
+  `;
+  if (todayRow) return todayRow.week_number;
+
+  const [recentRow] = await sql`
+    SELECT s.week_number FROM schedule s
+    WHERE s.season_id = ${seasonId}
+      AND s.bowl_date::TEXT <= ${today}
+      AND (
+        EXISTS (
+          SELECT 1 FROM checkins c
+          WHERE c.season_id = s.season_id
+            AND c.week_number = s.week_number
+        )
+        OR EXISTS (
+          SELECT 1 FROM game_results g
+          WHERE g.season_id = s.season_id
+            AND g.week_number = s.week_number
+        )
+      )
+    ORDER BY s.bowl_date DESC LIMIT 1
+  `;
+  if (recentRow) return recentRow.week_number;
+
+  const [upcomingRow] = await sql`
+    SELECT week_number FROM schedule
+    WHERE season_id = ${seasonId}
+      AND bowl_date::TEXT >= ${today}
+      AND is_position_round = false
+    ORDER BY bowl_date ASC LIMIT 1
+  `;
+  return upcomingRow?.week_number || null;
 }
 
 export async function GET(request) {
