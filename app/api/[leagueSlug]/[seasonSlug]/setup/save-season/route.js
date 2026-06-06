@@ -127,6 +127,14 @@ export async function POST(request) {
       }
     }
 
+    // Auto-populate season start_date and end_date from schedule
+    await sql`
+      UPDATE seasons SET
+        start_date = (SELECT MIN(bowl_date) FROM schedule WHERE season_id = ${seasonId}),
+        end_date   = (SELECT MAX(bowl_date) FROM schedule WHERE season_id = ${seasonId})
+      WHERE id = ${seasonId}
+    `;
+
     return NextResponse.json({ success: true, seasonId, seasonSlug });
   } catch (err) {
     console.error('Save season error:', err);
