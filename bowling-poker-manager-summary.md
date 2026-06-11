@@ -1,14 +1,13 @@
 # Bowling Poker Manager — Technical Reference
-*Last updated: June 6, 2026*
+*Last updated: June 11, 2026*
 
 ---
 
 ## Overview
 
-A Next.js 14 web app managing a charitable poker side-game played during bowling league nights. Players pay a weekly buy-in, draw cards for spares and strikes across three games, and the best legal 5-card poker hand wins each game's payout. A portion of each pool goes to a designated charity. Built for a local bowling league in the San Francisco Bay Area — architected for multi-league, multi-season licensing.
+A Next.js 14 web app managing a charitable poker side-game played during bowling league nights. Players pay a weekly buy-in, draw cards for spares and strikes across three games, and the best legal 5-card poker hand wins each game's payout. A portion of each pool goes to a designated charity — making this a charitable fundraising game, not gambling. Built for a local bowling league in the San Francisco Bay Area — architected for multi-league, multi-season licensing.
 
 **Live:** [bowling-poker-manager.vercel.app](https://bowling-poker-manager.vercel.app)
-
 **GitHub:** [StarlightEnt/bowling-poker-manager](https://github.com/StarlightEnt/bowling-poker-manager)
 
 ---
@@ -35,7 +34,7 @@ A Next.js 14 web app managing a charitable poker side-game played during bowling
 ```bash
 git clone https://github.com/StarlightEnt/bowling-poker-manager.git
 cd bowling-poker-manager
-nvm use          # Mac/Linux only — activates Node 24.16.0
+nvm use          # Mac/Linux only
 npm install
 echo "DATABASE_URL=your_neon_connection_string" > .env.local
 npm run dev
@@ -62,8 +61,6 @@ Slug-based routing — no numeric IDs in URLs.
 /[leagueSlug]/[seasonSlug]/setup
 ```
 
-**Current live example:** `/AcmBow/Sum26/checkin`
-
 ### Slug Rules
 - **League:** first 3 chars of each word → `Acme Bowling League` → `AcmBowLea`
 - **Season:** abbreviation + year(s):
@@ -83,12 +80,12 @@ seasons        (id, name, slug, league_id, start_date, end_date,
                 start_year, is_active, created_at,
                 charity_seed, progressive_seed)
 
-teams          (id, name)                        ← league-wide permanent
+teams          (id, name)
 
 season_teams   (id, season_id, team_id, team_number)
 
 bowlers        (id, full_name, normalized_name,
-                imported_name, email, is_sub)    ← league-wide permanent
+                imported_name, email, is_sub)
 
 season_roster  (id, season_id, team_id, bowler_id,
                 position_order, book_average, is_sub)
@@ -104,27 +101,30 @@ game_results   (id, season_id, week_number, game_number,
                 bowler_id, hand_type, hand_detail,
                 is_progressive_win, total_payout, progressive_payout)
 
-progressive_pot(id, season_id, week_number, entry_type,
-                amount, balance_after, notes)
+progressive_pot(id, season_id, week_number, transaction_type,
+                amount, balance_after, notes, created_at)
 
-charity_fund   (id, season_id, week_number, entry_type,
-                amount, balance_after, notes)
+charity_fund   (id, season_id, week_number, transaction_type,
+                amount, balance_after, notes, created_at)
 
 charitable_donations (id, season_id, week_number, amount, notes)
 
 historical_checkins  (id, season_name TEXT, week_number,
-                      player_count, charity_amount, bowl_date)
+                      player_count, pool_amount,
+                      charity_amount, bowl_date, created_at)
 
-settings       (league_id, key, value)           ← composite PK (league_id, key)
+settings       (league_id, key, value)  ← composite PK (league_id, key)
 ```
 
 ### Key Schema Notes
-- `imported_name` on bowlers — immutable identity key, set once at insert, NEVER updated, used for PDF re-import matching
-- `historical_checkins` uses `season_name TEXT` not a foreign key — always query by name string, never by season_id
+- `imported_name` on bowlers — immutable identity key, set once at insert, NEVER updated
+- `historical_checkins` uses `season_name TEXT` not a foreign key — always query by name string
 - `settings` composite PK is `(league_id, key)` — never query by key alone
 - `lane_positions` is JSONB array of team_numbers e.g. `[5,7,4,12,2,10,1,9,6,8,3,11]`
 - `bowl_date` must be cast `::TEXT` in queries — Neon driver format breaks `new Date()`
 - All numeric columns from Neon return as strings — always wrap in `parseFloat()` / `parseInt()`
+- `transaction_type` is the correct column name in both `progressive_pot` and `charity_fund`
+- `historical_checkins` has NO progressive column — only `charity_amount` and `player_count`
 
 ---
 
@@ -141,28 +141,46 @@ Per game = totals / 3
 ### Weekly Financial Flow
 1. **Check-in** → mark players paid
 2. **Optional donation** → add extra charity amount before locking
-3. **Lock Night** → writes ONE combined charity entry (pool formula + donation) to `charity_fund`; writes progressive to `progressive_pot`
+3. **Lock Night** → writes ONE combined charity entry (pool + donation) to `charity_fund`; writes progressive to `progressive_pot`
 4. **Game Night** → record winners only; no ledger writes except Royal Flush
-5. **Royal Flush** → zeroes progressive pot (payout entry in `progressive_pot`)
+5. **Royal Flush** → writes payout entry to `progressive_pot` with `balance_after = 0`
 6. **Unlock** → reverses lock entries + clears game results (destructive)
-7. **Donation edit on locked night** → silent relock — replaces `charity_fund` entry for that week
+7. **Donation edit on locked night** → silent relock
 
-### Running Total Formulas
-```javascript
-// Charity
-running_charity =
-  seasons.charity_seed
-  + SUM(historical_checkins.charity_amount WHERE season_name = season.name)
-  + last(charity_fund.balance_after ORDER BY id DESC)
+### Running Balance Formulas (single source of truth: `lib/finance.js`)
 
-// Progressive
-running_progressive =
-  seasons.progressive_seed
-  + COUNT(historical_checkins WHERE season_name = season.name) × progressive_nightly
-  + last(progressive_pot.balance_after ORDER BY id DESC)
+**Progressive Balance:**
+```
+IF last progressive_pot entry is transaction_type='payout' → return 0
+ELSE: progressive_seed + (COUNT(historical_checkins) × progressive_nightly) + last balance_after
 ```
 
-**Never** add `charitable_donations` separately to running totals — donations are already folded into `charity_fund` entries at lock time.
+**Charity Balance:**
+```
+IF charity payout has occurred (transaction_type='payout' in charity_fund):
+  → SUM(charity_fund.amount WHERE id > last payout id)
+ELSE:
+  → charity_seed + SUM(historical_checkins.charity_amount) + SUM(charity_fund.amount)
+```
+
+**CRITICAL:** All financial calculations MUST use `lib/finance.js` functions.
+Never duplicate these calculations inline in route files.
+
+---
+
+## `lib/finance.js` — Shared Finance Library
+
+Single source of truth for all financial math. Every API route imports from here.
+
+```javascript
+getProgressiveBalance(seasonId)  // current progressive pot
+getCharityBalance(seasonId)      // current charity running total
+getPayoutSummary(seasonId, playerCount)  // full payout breakdown
+getProgressiveNightly(seasonId)  // setting value
+getBuyinAmount(seasonId)         // setting value
+```
+
+**Never duplicate these calculations inline in route files.**
 
 ---
 
@@ -187,26 +205,26 @@ if (!season) return Response.json({ error: 'Season not found' }, { status: 404 }
 const sid = season.id;
 ```
 
-### Settings (league-scoped, not season-scoped)
+### Settings (league-scoped)
 ```javascript
 const settings = await sql`
   SELECT key, value FROM settings WHERE league_id = ${season.league_id}
 `;
 ```
 
-### Week Detection (day-agnostic)
+### Week Detection (day-agnostic — no hardcoded day of week)
 ```javascript
 async function detectWeek(seasonId) {
   const today = new Date().toISOString().split('T')[0];
 
-  // 1. Is today a bowling day for this season?
+  // 1. Is today a bowling day?
   const [todayRow] = await sql`
     SELECT week_number FROM schedule
     WHERE season_id = ${seasonId} AND bowl_date::TEXT = ${today}
   `;
   if (todayRow) return todayRow.week_number;
 
-  // 2. Most recent past week with checkin or game activity
+  // 2. Most recent past week with activity
   const [recentRow] = await sql`
     SELECT s.week_number FROM schedule s
     WHERE s.season_id = ${seasonId}
@@ -233,10 +251,7 @@ async function detectWeek(seasonId) {
 }
 ```
 
-Never hardcode day-of-week numbers. `bowl_date` in the schedule table is the source of truth for when a league bowls.
-
 ### Schedule Date Year Logic
-PDF schedule dates are MM/DD only. Use `seasons.start_year` as authoritative year:
 ```javascript
 const baseYear = startYear || new Date().getFullYear();
 const firstMm = parseInt(weeks[0].bowl_date_str.split('/')[0]);
@@ -252,8 +267,8 @@ bowlDate = `${year}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`
 ```
 bowling-poker-manager/
 ├── app/
-│   ├── globals.css                        ← CSS variables + light mode stub
-│   ├── layout.js                          ← Root layout, uses NavBar
+│   ├── globals.css
+│   ├── layout.js
 │   ├── page.js                            ← League picker
 │   ├── new-league/page.js                 ← New league setup form
 │   ├── components/
@@ -271,9 +286,9 @@ bowling-poker-manager/
 │           ├── settings/page.js
 │           └── setup/page.js
 ├── app/api/
-│   ├── leagues/route.js                   ← GET all leagues
-│   ├── leagues/[leagueSlug]/route.js      ← GET league + seasons
-│   ├── leagues/new/route.js               ← POST create league
+│   ├── leagues/route.js
+│   ├── leagues/[leagueSlug]/route.js
+│   ├── leagues/new/route.js
 │   └── [leagueSlug]/[seasonSlug]/
 │       ├── dashboard/route.js
 │       ├── dashboard/lanes/route.js
@@ -294,56 +309,16 @@ bowling-poker-manager/
 │           ├── parse-schedule/route.js
 │           └── save-season/route.js
 ├── lib/
-│   ├── db.js                              ← Neon connection
-│   └── pdfParser.js                       ← parseRosterPDF(), parseSchedulePDF()
+│   ├── db.js
+│   ├── finance.js                         ← ALL financial calculations
+│   └── pdfParser.js
 ├── migrations/                            ← DB migration scripts + README
 ├── CLAUDE.md                              ← Permanent Claude Code instructions
-├── .nvmrc                                 ← Node 24.16.0
-├── .npmrc
+├── .nvmrc
 ├── next.config.js
 ├── vercel.json
-└── package.json                           ← dev port 3005
+└── package.json
 ```
-
----
-
-## Screen Reference
-
-### League Picker (`/`)
-Full-width league cards with left accent border. `● last session` badge on last-used league (localStorage). Rainbow-border "Set Up New League" card. Fetches `GET /api/leagues`.
-
-### Season Picker (`/[leagueSlug]`)
-Breadcrumb showing league + venue. Season cards with active/complete status. Start/end dates derived from schedule on import. Rainbow-border "Set Up New Season" card. Fetches `GET /api/leagues/[leagueSlug]`.
-
-### New League Setup (`/new-league`)
-Two equal cards: League Identity (name, slug, venue, city, state, charity, accent color swatches + hex, live preview bar) + Game Rules (buy-in, progressive nightly with ÷3 validation, live payout preview). Full-width save row. POSTs to `/api/leagues/new`.
-
-### Dashboard (`/[leagueSlug]/[seasonSlug]`)
-Current week banner (week, date, status, checkins, pool, progressive, charity, games). Season progress bar — counts `game_results` game 3 OR `historical_checkins` as complete. Nav cards. Lane Graphic (current + upcoming week, responsive `repeat(auto-fill, minmax(150px, 1fr))`).
-
-### Check-In (`/checkin`)
-Auto-detects current week (backward-looking). Week selector dropdown. 4-column alpha grid, tap to toggle. VACANT dimmed/non-tappable. Subs section below. Edit modal (✎) edits `bowlers.full_name`. Lock/Unlock Night.
-
-### Game Night (`/gamenight`)
-Zero-player guard. Payout Summary card. Donation card (silent relock if night locked). 3 game slots with winner autocomplete, hand type dropdown, detail field. Progressive auto-ticks on Royal Flush. Tie split support.
-
-### Report (`/report`)
-Auto-loads most recent complete week. Week selector. Dark/Light toggle. Themed report card with rainbow stripe. Charity name from `leagues.charity_name`. Download PNG at 2x resolution.
-
-### Schedule (`/schedule`)
-All weeks with lane assignments. Edit starting_lane. Position round weeks editable. Current week highlighted.
-
-### Roster (`/roster`)
-Teams as cards. Inline editable: Full Name, Display Name, Avg, Email, Team Name. VACANT dimmed but editable. Subs section. Collapsible Re-import PDF panel (non-destructive merge, matched on `imported_name`).
-
-### History (`/history`)
-Season filter. Summary card. Charity ledger drawer (clickable, running balance). Game log table (date descending, color-coded hand badges, progressive wins highlighted).
-
-### Settings (`/settings`)
-League Identity, Game Rules, Season Seeds (with warning), Appearance (dark/light mode), Danger Zone (charity payout, season setup link).
-
-### Season Setup (`/setup`)
-Step 1: League Standings PDF → teams, bowlers, subs. Step 2: Schedule PDF → lane assignments. Step 3: Season Name, Short Name/Slug (auto-generated), Season Start Year (used for date math). Access via Settings only (destructive).
 
 ---
 
@@ -353,65 +328,97 @@ Client Component (`'use client'`). Uses `usePathname()` to detect route context.
 
 - **On `/` and `/new-league`:** app title only, no nav links
 - **On `/[leagueSlug]`:** app title only, no nav links
-- **On `/[leagueSlug]/[seasonSlug]/*`:** full nav links + context bar
+- **On `/[leagueSlug]/[seasonSlug]/*`:** full nav + context bar
 
-Context bar: `Acme Bowling League · Summer '26` (dynamically fetched from DB via `/api/leagues/[leagueSlug]`) centered, with `[LEAGUES]` button absolutely positioned right → `router.push('/')`.
+Context bar: league name · season name (dynamic from DB), centered, with `[LEAGUES]` button right → `router.push('/')`.
 
-**localStorage:**
-- Writes `lastLeagueSlug` + `lastSeasonSlug` on every league+season page load
-- League picker reads `lastLeagueSlug` to show `● last session` badge
-- `theme` key stores light/dark mode preference
+**localStorage keys:**
+- `lastLeagueSlug` + `lastSeasonSlug` — written on every league+season page load
+- `theme` — light/dark mode preference
+
+---
+
+## Screen Reference
+
+### League Picker (`/`)
+Full-width league cards, left accent border in league color. `● last session` badge on last-used league. Rainbow-border "Set Up New League" card. Fetches `GET /api/leagues`.
+
+### Season Picker (`/[leagueSlug]`)
+Breadcrumb, full-width season cards (active/complete), start/end dates from schedule. Rainbow-border "Set Up New Season" card. Fetches `GET /api/leagues/[leagueSlug]`.
+
+### New League Setup (`/new-league`)
+Two equal cards: League Identity + Game Rules. Color swatches, live preview bar, payout preview. Full-width save row. POSTs to `/api/leagues/new`.
+
+### Dashboard (`/[leagueSlug]/[seasonSlug]`)
+Week banner, season progress, nav cards, lane graphic (current + upcoming week).
+
+### Check-In
+Auto-detects week. 4-column alpha grid. Lock/Unlock Night.
+
+### Game Night
+Payout summary, donation card, 3 game slots, Royal Flush auto-progressive.
+
+### Report
+Weekly PNG export, dark/light toggle, rainbow stripe card, charity name from DB.
+
+### Schedule
+16 weeks, lane assignments, edit starting lane, position rounds.
+
+### Roster
+Team cards, inline editable, VACANT dimmed, subs section, re-import PDF.
+
+### History
+Season filter, charity ledger drawer, game log, leaderboard.
+
+### Settings
+League identity, game rules, season seeds, appearance, danger zone.
+
+### Season Setup
+PDF import: League Standings + Schedule. Season name, slug, start year. Access via Settings only.
 
 ---
 
 ## PDF Parsing
 
-### League Standings PDF (BLS software)
-- Page 2: Team Rosters
-  - Week 1 format: team header split across two lines
-  - Week 2+ format: team header single line
+### League Standings (BLS software)
+- Page 2: Team Rosters (Week 1 format differs from Week 2+)
 - Page 3: Temporary Substitutes
-- Page 4: Ignored
-- VACANT rows included as placeholder bowlers
-- Awards/birthday sections filtered out
+- VACANT rows included, awards/birthday sections filtered
 
-### Schedule/Bylaws PDF
-- Lane assignments on last page
+### Schedule PDF
 - Format: `Wk01 04/22 5- 7 4- 12 2- 10 1- 9 6- 8 3- 11`
-- Week 12 split line handled by continuation join
-- Week 15 position round detection
+- Year derived from `seasons.start_year` (NOT today's date)
+- Month rollover: if month < first week's month → year + 1
 
 ### Name Normalization
 - Format: `First LastInitial` e.g. `Mark B`
 - Strips role suffixes: `-*`, `-Sec`, `-Tr`, `-Pres`, `-VP`
-- Skips generational suffixes: II, III, Jr, Sr
-- Subs segregated by `is_sub` flag — no prefix
+- Skips: II, III, Jr, Sr
 
 ---
 
-## Lane Graphic API (`/api/[leagueSlug]/[seasonSlug]/dashboard/lanes`)
+## Lane Graphic API
 
-Returns current week + next upcoming week (skips position rounds) in one call.
-
-- `lane_positions` JSONB array of team_numbers: pairs at indices [0,1], [2,3], [4,5]...
-- team_number → `season_teams` → `teams` (name) → `season_roster` → `bowlers` (normalized_name, sorted by position_order)
-- VACANT included, flagged `isVacant: true`
-- `hasPairs: false` → TBD placeholder rendered on dashboard
+Returns current week + next upcoming week (skips position rounds).
+- `lane_positions` JSONB pairs: [0,1], [2,3], [4,5]...
+- team_number → `season_teams` → `teams` → `season_roster` → `bowlers.normalized_name`
+- VACANT flagged `isVacant: true`, `hasPairs: false` → TBD placeholder
 
 ---
 
-## Database Migrations
+## Migrations
 
-Scripts live in `migrations/`. Always idempotent (`IF NOT EXISTS`). Run with:
-```powershell
-node --use-system-ca --env-file=.env.local migrations/FILENAME.mjs
+```
+migrations/20260606-add-season-start-year.mjs
+migrations/20260606-populate-season-dates.mjs
+migrations/20260606-fix-summer26-schedule-dates.mjs
+migrations/20260611-fix-week8-royal-flush-payout.mjs
 ```
 
-| Date | File | Description |
-|------|------|-------------|
-| 2026-06-06 | 20260606-add-season-start-year.mjs | Add start_year to seasons |
-| 2026-06-06 | 20260606-populate-season-dates.mjs | Derive start/end dates from schedule |
-| 2026-06-06 | 20260606-fix-summer26-schedule-dates.mjs | Fix initial season bowl_dates incorrect year assignment |
+Run with:
+```bash
+node --use-system-ca --env-file=.env.local migrations/FILENAME.mjs
+```
 
 ---
 
@@ -433,15 +440,31 @@ node --use-system-ca --env-file=.env.local migrations/FILENAME.mjs
 | Lane card border | `#1a4040` |
 | Lane team accent | `#c084fc` (lavender — V2 configurable) |
 
-- Form labels: `#e8ff47` bold uppercase 10px letterSpacing 1px
+- Form labels: `#e8ff47` bold uppercase 10px
 - Rainbow gradient: `linear-gradient(135deg, #FF0018 0%, #FFA52C 14%, #FFFF41 28%, #008018 42%, #0000F9 57%, #86007D 71%, #FF0018 85%, #FFA52C 100%)`
 - All styling via inline styles — no CSS framework
-- Dark theme throughout; light mode stub in `globals.css` (V2)
+- Light mode: stub only in `globals.css` (V3)
 
 ---
 
-## Known Limitations / V2 Backlog
+## Known Issues / Lessons Learned
 
-- Light mode CSS is a stub only — full design pass needed
-- Lane team accent color (`#c084fc`) hardcoded — should be configurable per league in Settings
-- NavBar fetches league/season names on every page load — could be optimized with caching
+- **Always verify column names against live schema before writing any finance.js code**
+- `transaction_type` is the correct column in both `charity_fund` and `progressive_pot` (NOT `entry_type`)
+- `historical_checkins` has NO progressive column — use `COUNT(*)` × nightly for historical progressive
+- Financial calculations MUST go through `lib/finance.js` — never inline in routes
+- When writing TASK.md for financial changes, include schema verification step first
+
+---
+
+## V3 Backlog
+
+- **Authentication** — Auth.js + Google OAuth, per-league admin access (most critical before licensing)
+- **Mobile responsive** — hamburger nav, vertical card stacking, touch-optimized for phone use during bowling night
+- **Light mode** — full CSS design pass (stub exists)
+- **Configurable team accent color** — per-league in Settings (currently hardcoded `#c084fc`)
+- **NavBar context fetch optimization** — currently fetches on every page load
+- **Player-facing read-only view** — players check standings on their phones
+- **Email/SMS report delivery** — auto-send weekly PNG
+- **Multi-admin per league**
+- **Progressive pot history ledger** — full view of contributions and payouts
