@@ -25,8 +25,12 @@ export async function GET(request) {
     `;
 
     const settingsRows = await sql`SELECT key, value FROM settings WHERE league_id = ${season.league_id}`;
-    const settings = {};
-    for (const { key, value } of settingsRows) settings[key] = value;
+    const getSetting = (key, def) => {
+      const row = settingsRows.find(s => s.key === key);
+      return row ? parseFloat(row.value) : def;
+    };
+    const progressiveNightly = getSetting('progressive_nightly', 3);
+    const buyinAmount = getSetting('buyin_amount', 5);
 
     const [charityBalance, progressiveBalance] = await Promise.all([
       getCharityBalance(season.id),
@@ -37,7 +41,7 @@ export async function GET(request) {
       league,
       charityName: league.charity_name || '',
       settings: {
-        buyin_amount: parseFloat(settings.buyin_amount ?? 5),
+        buyin_amount: buyinAmount,
         progressive_nightly: progressiveNightly,
       },
       season: {
