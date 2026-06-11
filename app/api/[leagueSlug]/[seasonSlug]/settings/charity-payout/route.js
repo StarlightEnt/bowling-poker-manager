@@ -1,4 +1,5 @@
 import sql from '@/lib/db';
+import { getCharityBalance } from '@/lib/finance';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,15 +28,7 @@ export async function POST(request) {
     `;
     if (!season) return Response.json({ error: 'Season not found' }, { status: 404 });
 
-    const [charRow] = await sql`
-      SELECT balance_after FROM charity_fund
-      WHERE season_id = ${season.id}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const [seedRow] = await sql`SELECT charity_seed FROM seasons WHERE id = ${season.id}`;
-    const currentBalance = charRow
-      ? parseFloat(charRow.balance_after)
-      : parseFloat(seedRow.charity_seed);
+    const currentBalance = await getCharityBalance(season.id);
 
     const payoutAmount = parseFloat(amount);
     if (Math.abs(payoutAmount - currentBalance) > 0.001) {

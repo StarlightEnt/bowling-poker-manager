@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
+import { getProgressiveBalance, getCharityBalance, getPayoutSummary } from '@/lib/finance';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,18 +54,13 @@ export async function GET(request) {
     const seasonSlug = parts[2];
 
     const [season] = await sql`
-      SELECT s.id, s.name, s.progressive_seed, s.charity_seed, s.league_id
+      SELECT s.id
       FROM seasons s
       JOIN leagues l ON l.id = s.league_id
       WHERE l.slug = ${leagueSlug} AND s.slug = ${seasonSlug}
       LIMIT 1
     `;
     if (!season) return NextResponse.json({ error: 'Season not found' }, { status: 404 });
-
-    const settings = await sql`SELECT key, value FROM settings WHERE league_id = ${season.league_id}`;
-    const cfg = Object.fromEntries(settings.map(s => [s.key, parseFloat(s.value)]));
-    const buyinAmount = cfg.buyin_amount || 5;
-    const progressiveNightly = cfg.progressive_nightly || 3;
 
     const week = weekNumber ? parseInt(weekNumber) : await detectWeek(season.id);
     if (!week) return NextResponse.json({ error: 'Could not determine current week' }, { status: 404 });
@@ -83,9 +79,11 @@ export async function GET(request) {
     `;
 
     const playerCount = checkedIn.length;
-    const pool = playerCount * buyinAmount;
-    const payoutTotal = playerCount === 0 ? 0 : Math.floor((pool - progressiveNightly) / 4) * 3;
-    const charityTotal = playerCount === 0 ? 0 : pool - progressiveNightly - payoutTotal;
+    const summary = await getPayoutSummary(season.id, playerCount);
+    const { progressiveNightly, buyinAmount } = summary;
+    const pool = summary.pool;
+    const payoutTotal = playerCount === 0 ? 0 : summary.payoutTotal;
+    const charityTotal = playerCount === 0 ? 0 : summary.charityNightly;
     const perGame = {
       pool:        playerCount === 0 ? 0 : pool / 3,
       progressive: playerCount === 0 ? 0 : progressiveNightly / 3,
@@ -96,27 +94,10 @@ export async function GET(request) {
     const lockRows = await sql`SELECT id FROM progressive_pot WHERE season_id = ${season.id} AND week_number = ${week} AND transaction_type = 'lock'`;
     const isLocked = lockRows.length > 0;
 
-    const [histProgRow] = await sql`
-      SELECT COUNT(*)::int AS weeks FROM historical_checkins WHERE season_name = ${season.name}
-    `;
-    const [liveProgRow] = await sql`
-      SELECT balance_after FROM progressive_pot WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1
-    `;
-    const progressiveBalance =
-      parseFloat(season.progressive_seed) +
-      parseInt(histProgRow.weeks) * progressiveNightly +
-      (liveProgRow ? parseFloat(liveProgRow.balance_after) : 0);
-
-    const [histCharityRow] = await sql`
-      SELECT COALESCE(SUM(charity_amount), 0) AS total FROM historical_checkins WHERE season_name = ${season.name}
-    `;
-    const [liveCharityRow] = await sql`
-      SELECT balance_after FROM charity_fund WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1
-    `;
-    const charityBalance =
-      parseFloat(season.charity_seed) +
-      parseFloat(histCharityRow.total) +
-      (liveCharityRow ? parseFloat(liveCharityRow.balance_after) : 0);
+    const [progressiveBalance, charityBalance] = await Promise.all([
+      getProgressiveBalance(season.id),
+      getCharityBalance(season.id),
+    ]);
 
     const results = await sql`
       SELECT gr.*, b.normalized_name, b.full_name
@@ -169,11 +150,10 @@ export async function POST(request) {
     await sql`DELETE FROM game_results WHERE season_id = ${seasonId} AND week_number = ${weekNumber} AND game_number = ${gameNumber}`;
     await sql`DELETE FROM progressive_pot WHERE season_id = ${seasonId} AND week_number = ${weekNumber} AND transaction_type = 'payout'`;
 
-    const [progRow] = await sql`SELECT balance_after FROM progressive_pot WHERE season_id = ${seasonId} ORDER BY id DESC LIMIT 1`;
-    const progressiveBalance = progRow ? parseFloat(progRow.balance_after) : 0;
+    const progressivePayout = isProgressiveWin ? await getProgressiveBalance(seasonId) : 0;
 
     const splitPayout = winners.length > 1 ? perGame.payout / winners.length : perGame.payout;
-    const splitProgressive = isProgressiveWin ? progressiveBalance / winners.length : 0;
+    const splitProgressive = isProgressiveWin ? progressivePayout / winners.length : 0;
 
     for (const bowlerId of winners) {
       await sql`
@@ -182,12 +162,12 @@ export async function POST(request) {
       `;
     }
 
-    let newProgressiveBalance = progressiveBalance;
+    let newProgressiveBalance = progressivePayout;
     if (isProgressiveWin) {
       newProgressiveBalance = 0;
       await sql`
         INSERT INTO progressive_pot (season_id, week_number, transaction_type, amount, balance_after, notes)
-        VALUES (${seasonId}, ${weekNumber}, 'payout', ${progressiveBalance}, 0, ${'Royal Flush - Game ' + gameNumber})
+        VALUES (${seasonId}, ${weekNumber}, 'payout', ${progressivePayout}, 0, ${'Royal Flush - Game ' + gameNumber})
       `;
     }
 

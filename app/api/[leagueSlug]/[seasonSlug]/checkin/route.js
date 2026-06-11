@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
+import { getProgressiveBalance, getCharityBalance } from '@/lib/finance';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,10 +87,10 @@ export async function GET(request) {
     const lockRows = await sql`SELECT id FROM progressive_pot WHERE season_id = ${season.id} AND week_number = ${week} AND transaction_type = 'lock'`;
     const isLocked = lockRows.length > 0;
 
-    const [progRow] = await sql`SELECT balance_after FROM progressive_pot WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1`;
-    const progressiveBalance = progRow ? parseFloat(progRow.balance_after) : 0;
-    const [charRow] = await sql`SELECT balance_after FROM charity_fund WHERE season_id = ${season.id} ORDER BY id DESC LIMIT 1`;
-    const charityBalance = charRow ? parseFloat(charRow.balance_after) : 0;
+    const [progressiveBalance, charityBalance] = await Promise.all([
+      getProgressiveBalance(season.id),
+      getCharityBalance(season.id),
+    ]);
 
     const weeks = await sql`SELECT week_number, bowl_date FROM schedule WHERE season_id = ${season.id} AND is_position_round = false ORDER BY week_number ASC`;
 
@@ -153,10 +154,10 @@ export async function POST(request) {
       const donationAmount = donationRow ? parseFloat(donationRow.amount) : 0;
       const totalCharityAmount = charityNightly + donationAmount;
 
-      const [progRow] = await sql`SELECT balance_after FROM progressive_pot WHERE season_id = ${seasonId} ORDER BY id DESC LIMIT 1`;
-      const progressiveBalance = progRow ? parseFloat(progRow.balance_after) : 0;
-      const [charRow] = await sql`SELECT balance_after FROM charity_fund WHERE season_id = ${seasonId} ORDER BY id DESC LIMIT 1`;
-      const charityBalance = charRow ? parseFloat(charRow.balance_after) : 0;
+      const [progressiveBalance, charityBalance] = await Promise.all([
+        getProgressiveBalance(seasonId),
+        getCharityBalance(seasonId),
+      ]);
 
       const newProgressiveBalance = progressiveBalance + progressiveNightly;
       await sql`INSERT INTO progressive_pot (season_id, week_number, transaction_type, amount, balance_after, notes) VALUES (${seasonId}, ${weekNumber}, 'lock', ${progressiveNightly}, ${newProgressiveBalance}, 'Night locked')`;

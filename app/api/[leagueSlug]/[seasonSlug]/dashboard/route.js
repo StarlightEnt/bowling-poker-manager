@@ -1,4 +1,5 @@
 import sql from '@/lib/db';
+import { getProgressiveBalance, getCharityBalance } from '@/lib/finance';
 
 export const dynamic = 'force-dynamic';
 
@@ -118,19 +119,8 @@ export async function GET(request) {
     `;
     const gamesEntered = parseInt(gameRows[0]?.cnt ?? 0, 10);
 
-    const progRows = await sql`
-      SELECT balance_after FROM progressive_pot
-      WHERE season_id = ${sid}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const progressivePot = parseFloat(progRows[0]?.balance_after ?? 0);
-
-    const charityRows = await sql`
-      SELECT balance_after FROM charity_fund
-      WHERE season_id = ${sid}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const charityFund = parseFloat(charityRows[0]?.balance_after ?? 0);
+    const progressivePot = await getProgressiveBalance(sid);
+    const charityFund = await getCharityBalance(sid);
 
     const weeksComplete = schedRows.filter(w => w.status === 'complete').length;
     const totalWeeks = schedRows.length;

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
+import { getProgressiveBalance, getCharityBalance } from '@/lib/finance';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,35 +74,10 @@ export async function GET(request) {
       ORDER BY gr.game_number, gr.id
     `;
 
-    const [histProgRow] = await sql`
-      SELECT COUNT(*)::int AS weeks
-      FROM historical_checkins
-      WHERE season_name = ${season.name} AND week_number <= ${week}
-    `;
-    const [liveProgRow] = await sql`
-      SELECT balance_after FROM progressive_pot
-      WHERE season_id = ${season.id} AND week_number <= ${week}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const progressiveBalance =
-      parseFloat(season.progressive_seed) +
-      parseInt(histProgRow.weeks) * progressiveNightly +
-      (liveProgRow ? parseFloat(liveProgRow.balance_after) : 0);
-
-    const [histCharityRow] = await sql`
-      SELECT COALESCE(SUM(charity_amount), 0) AS total
-      FROM historical_checkins
-      WHERE season_name = ${season.name} AND week_number <= ${week}
-    `;
-    const [liveCharityRow] = await sql`
-      SELECT balance_after FROM charity_fund
-      WHERE season_id = ${season.id} AND week_number <= ${week}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const charityBalance =
-      parseFloat(season.charity_seed) +
-      parseFloat(histCharityRow.total) +
-      (liveCharityRow ? parseFloat(liveCharityRow.balance_after) : 0);
+    const [progressiveBalance, charityBalance] = await Promise.all([
+      getProgressiveBalance(season.id),
+      getCharityBalance(season.id),
+    ]);
 
     const [leagueRow] = await sql`SELECT charity_name FROM leagues WHERE id = ${season.league_id}`;
 

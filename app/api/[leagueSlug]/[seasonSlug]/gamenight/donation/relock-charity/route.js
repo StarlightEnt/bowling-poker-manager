@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import sql from '@/lib/db';
+import { getCharityBalance } from '@/lib/finance';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,7 @@ export async function POST(request) {
     }
 
     const [season] = await sql`
-      SELECT id, name, charity_seed, league_id FROM seasons WHERE id = ${seasonId}
+      SELECT id, league_id FROM seasons WHERE id = ${seasonId}
     `;
     if (!season) return NextResponse.json({ error: 'Season not found' }, { status: 404 });
 
@@ -37,27 +38,13 @@ export async function POST(request) {
     const donationAmount = donationRow ? parseFloat(donationRow.amount) : 0;
     const totalCharity = charityFromPool + donationAmount;
 
-    const [histCharityRow] = await sql`
-      SELECT COALESCE(SUM(charity_amount), 0) AS total
-      FROM historical_checkins
-      WHERE season_name = ${season.name}
-    `;
-    const [priorLiveRow] = await sql`
-      SELECT balance_after FROM charity_fund
-      WHERE season_id = ${seasonId} AND week_number < ${weekNumber}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const priorBalance =
-      parseFloat(season.charity_seed) +
-      parseFloat(histCharityRow.total) +
-      (priorLiveRow ? parseFloat(priorLiveRow.balance_after) : 0);
-
-    const newBalanceAfter = priorBalance + totalCharity;
-
     await sql`
       DELETE FROM charity_fund
       WHERE season_id = ${seasonId} AND week_number = ${weekNumber} AND transaction_type = 'lock'
     `;
+
+    const priorBalance = await getCharityBalance(seasonId);
+    const newBalanceAfter = priorBalance + totalCharity;
 
     const notes = donationAmount > 0 ? 'Night locked + donation' : 'Night locked';
     await sql`

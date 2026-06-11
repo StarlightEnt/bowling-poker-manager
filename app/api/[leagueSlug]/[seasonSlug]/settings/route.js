@@ -1,4 +1,5 @@
 import sql from '@/lib/db';
+import { getProgressiveBalance, getCharityBalance } from '@/lib/finance';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,37 +28,10 @@ export async function GET(request) {
     const settings = {};
     for (const { key, value } of settingsRows) settings[key] = value;
 
-    const progressiveNightly = parseFloat(settings.progressive_nightly ?? 3);
-
-    const [histCharityRow] = await sql`
-      SELECT COALESCE(SUM(charity_amount), 0) AS total
-      FROM historical_checkins
-      WHERE season_name = ${season.name}
-    `;
-    const [liveCharityRow] = await sql`
-      SELECT balance_after FROM charity_fund
-      WHERE season_id = ${season.id}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const charityBalance =
-      parseFloat(season.charity_seed) +
-      parseFloat(histCharityRow.total) +
-      (liveCharityRow ? parseFloat(liveCharityRow.balance_after) : 0);
-
-    const [histProgRow] = await sql`
-      SELECT COUNT(*)::int AS weeks
-      FROM historical_checkins
-      WHERE season_name = ${season.name}
-    `;
-    const [liveProgRow] = await sql`
-      SELECT balance_after FROM progressive_pot
-      WHERE season_id = ${season.id}
-      ORDER BY id DESC LIMIT 1
-    `;
-    const progressiveBalance =
-      parseFloat(season.progressive_seed) +
-      parseInt(histProgRow.weeks) * progressiveNightly +
-      (liveProgRow ? parseFloat(liveProgRow.balance_after) : 0);
+    const [charityBalance, progressiveBalance] = await Promise.all([
+      getCharityBalance(season.id),
+      getProgressiveBalance(season.id),
+    ]);
 
     return Response.json({
       league,
