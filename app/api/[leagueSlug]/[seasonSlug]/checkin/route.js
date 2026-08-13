@@ -38,7 +38,7 @@ async function detectWeek(seasonId) {
     SELECT week_number FROM schedule
     WHERE season_id = ${seasonId}
       AND bowl_date::TEXT >= ${today}
-      AND is_position_round = false
+
     ORDER BY bowl_date ASC LIMIT 1
   `;
   return upcomingRow?.week_number || null;
@@ -92,7 +92,7 @@ export async function GET(request) {
       getCharityBalance(season.id),
     ]);
 
-    const weeks = await sql`SELECT week_number, bowl_date FROM schedule WHERE season_id = ${season.id} AND is_position_round = false ORDER BY week_number ASC`;
+    const weeks = await sql`SELECT week_number, bowl_date FROM schedule WHERE season_id = ${season.id} ORDER BY week_number ASC`;
 
     const playerCount = checkedInIds.size;
     const pool = playerCount * buyinAmount;
