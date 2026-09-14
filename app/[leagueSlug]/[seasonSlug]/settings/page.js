@@ -181,11 +181,6 @@ export default function SettingsPage({ params }) {
   const [payoutSaving,    setPayoutSaving]     = useState(false);
   const [payoutMsg,       setPayoutMsg]        = useState('');
 
-  const [showDeleteModal,   setShowDeleteModal]   = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const [deleteSaving,      setDeleteSaving]      = useState(false);
-  const [deleteMsg,         setDeleteMsg]         = useState('');
-
   const load = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
@@ -229,13 +224,6 @@ export default function SettingsPage({ params }) {
       setPayoutMsg('');
     }
   }, [showPayoutModal]);
-
-  useEffect(() => {
-    if (showDeleteModal) {
-      setDeleteConfirmText('');
-      setDeleteMsg('');
-    }
-  }, [showDeleteModal]);
 
   async function saveLeague() {
     setLeagueSaving(true);
@@ -285,16 +273,21 @@ export default function SettingsPage({ params }) {
   }
 
   async function saveSeeds() {
+    if (!seasonName.trim()) {
+      setSeedsMsg('✗ Season name cannot be empty');
+      return;
+    }
     setSeedsSaving(true);
     setSeedsMsg('');
     try {
       const res = await fetch(`/api/${leagueSlug}/${seasonSlug}/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ seeds: { charity_seed: parseFloat(charitySeed), progressive_seed: parseFloat(progressiveSeed) } }),
+        body: JSON.stringify({ seeds: { name: seasonName.trim(), charity_seed: parseFloat(charitySeed), progressive_seed: parseFloat(progressiveSeed) } }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Save failed');
+      setSeasonName(seasonName.trim());
       setSeedsMsg('✓ Saved');
     } catch (e) {
       setSeedsMsg('✗ ' + e.message);
@@ -332,25 +325,6 @@ export default function SettingsPage({ params }) {
       setPayoutMsg('✗ ' + e.message);
     } finally {
       setPayoutSaving(false);
-    }
-  }
-
-  async function deleteSeason() {
-    setDeleteSaving(true);
-    setDeleteMsg('');
-    try {
-      const res = await fetch(`/api/${leagueSlug}/${seasonSlug}/settings/delete-season`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmName: deleteConfirmText }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Delete failed');
-      router.push(`/${leagueSlug}`);
-    } catch (e) {
-      setDeleteMsg('✗ ' + e.message);
-    } finally {
-      setDeleteSaving(false);
     }
   }
 
@@ -435,21 +409,12 @@ export default function SettingsPage({ params }) {
       </Card>
 
       <Card>
-        <CardTitle>Season Seeds</CardTitle>
-        <CardSubtitle>Opening balances rolled over from prior seasons. Changing these affects all cumulative season totals.</CardSubtitle>
+        <CardTitle>Season</CardTitle>
+        <CardSubtitle>Season name and opening balances rolled over from prior seasons. Renaming here only changes the display name — the slug used in URLs stays the same.</CardSubtitle>
 
-        <div style={{
-          background: S.surface2,
-          border: `1px solid ${S.border}`,
-          borderRadius: 4,
-          padding: '6px 12px',
-          display: 'inline-block',
-          marginBottom: 18,
-          fontSize: 11,
-          color: S.muted,
-        }}>
-          Active Season: <span style={{ color: S.accent }}>{seasonName}</span>
-        </div>
+        <FieldRow label="Season Name">
+          <TextInput value={seasonName} onChange={setSeasonName} style={{ width: 280 }} />
+        </FieldRow>
 
         <FieldRow label="Charity Opening Balance">
           <DollarInput value={charitySeed} onChange={setCharitySeed} min={0} />
@@ -485,9 +450,9 @@ export default function SettingsPage({ params }) {
         </div>
 
         <p style={{ color: S.accent2, fontSize: 11, marginBottom: 8 }}>
-          ⚠ Changing these values affects all season totals in History
+          ⚠ Changing the opening balances affects all season totals in History
         </p>
-        <SaveButton onClick={saveSeeds} saving={seedsSaving} label="Save Season Seeds" />
+        <SaveButton onClick={saveSeeds} saving={seedsSaving} label="Save Season Info" />
         <StatusMsg msg={seedsMsg} />
       </Card>
 
@@ -577,33 +542,6 @@ export default function SettingsPage({ params }) {
             }}
           >
             Go to Season Setup →
-          </button>
-        </div>
-
-        <div style={{ marginTop: 28, paddingTop: 24, borderTop: `1px solid ${S.border}` }}>
-          <p style={{ color: S.text, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-            Delete This Season
-          </p>
-          <p style={{ color: S.muted, fontSize: 11, marginBottom: 12, lineHeight: 1.6, maxWidth: 520 }}>
-            Permanently deletes this season&apos;s teams, roster, schedule, check-ins, game
-            results, and financial ledger entries (progressive pot / charity fund / donations)
-            for this season only. The league itself and its other seasons are not affected.
-            This cannot be undone.
-          </p>
-          <button
-            onClick={() => setShowDeleteModal(true)}
-            style={{
-              background: 'none',
-              border: `1px solid ${S.red}`,
-              borderRadius: 4,
-              color: S.red,
-              fontFamily: 'DM Mono, monospace',
-              fontSize: 12,
-              padding: '7px 16px',
-              cursor: 'pointer',
-            }}
-          >
-            Delete This Season
           </button>
         </div>
       </Card>
@@ -727,102 +665,6 @@ export default function SettingsPage({ params }) {
                   fontSize: 12,
                   padding: '8px 20px',
                   cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showDeleteModal && (
-        <div style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(0,0,0,0.75)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1000,
-        }}>
-          <div style={{
-            background: S.surface,
-            border: `1px solid ${S.red}`,
-            borderRadius: 8,
-            padding: 32,
-            width: 440,
-            maxWidth: '90vw',
-          }}>
-            <h3 style={{
-              fontFamily: "'Bebas Neue', sans-serif",
-              fontSize: 20,
-              letterSpacing: 2,
-              color: S.red,
-              margin: '0 0 12px',
-            }}>
-              Delete This Season
-            </h3>
-
-            <p style={{ color: S.muted, fontSize: 11, marginBottom: 18, lineHeight: 1.6 }}>
-              This permanently deletes <span style={{ color: S.text }}>{seasonName}</span>&apos;s
-              teams, roster, schedule, check-ins, game results, and financial ledger entries
-              for this season only. The league and its other seasons are not affected.
-              This cannot be undone.
-            </p>
-
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ color: S.muted, fontSize: 11, display: 'block', marginBottom: 5 }}>
-                Type the season name (<span style={{ color: S.text }}>{seasonName}</span>) to confirm
-              </label>
-              <input
-                type="text"
-                value={deleteConfirmText}
-                onChange={e => setDeleteConfirmText(e.target.value)}
-                placeholder={seasonName}
-                style={{
-                  background: S.surface2,
-                  border: `1px solid ${S.border}`,
-                  borderRadius: 4,
-                  color: S.text,
-                  fontFamily: 'DM Mono, monospace',
-                  fontSize: 12,
-                  padding: '7px 10px',
-                  width: '100%',
-                }}
-              />
-            </div>
-
-            <StatusMsg msg={deleteMsg} />
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-              <button
-                onClick={deleteSeason}
-                disabled={deleteSaving || deleteConfirmText !== seasonName}
-                style={{
-                  background: (deleteSaving || deleteConfirmText !== seasonName) ? S.surface2 : S.red,
-                  color: (deleteSaving || deleteConfirmText !== seasonName) ? S.muted : '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  padding: '8px 20px',
-                  fontFamily: 'DM Mono, monospace',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: (deleteSaving || deleteConfirmText !== seasonName) ? 'default' : 'pointer',
-                  flex: 1,
-                }}
-              >
-                {deleteSaving ? 'Deleting…' : 'Delete This Season'}
-              </button>
-              <button
-                onClick={() => setShowDeleteModal(false)}
-                disabled={deleteSaving}
-                style={{
-                  background: 'none',
-                  border: `1px solid ${S.border}`,
-                  borderRadius: 4,
-                  color: S.muted,
-                  fontFamily: 'DM Mono, monospace',
-                  fontSize: 12,
-                  padding: '8px 20px',
-                  cursor: deleteSaving ? 'default' : 'pointer',
                 }}
               >
                 Cancel

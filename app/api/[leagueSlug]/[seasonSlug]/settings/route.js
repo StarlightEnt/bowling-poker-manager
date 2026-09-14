@@ -1,3 +1,4 @@
+// PATH: app/api/[leagueSlug]/[seasonSlug]/settings/route.js
 import sql from '@/lib/db';
 import { getProgressiveBalance, getCharityBalance } from '@/lib/finance';
 
@@ -118,7 +119,18 @@ export async function POST(request) {
     }
 
     if (seeds) {
-      const { charity_seed, progressive_seed } = seeds;
+      // NOTE: "seeds" also carries the season name now — same card/save button
+      // on the Settings page. This updates seasons.name only; seasons.slug
+      // (used in URLs) is never touched here.
+      const { name, charity_seed, progressive_seed } = seeds;
+
+      if (name !== undefined) {
+        const trimmed = String(name).trim();
+        if (!trimmed) {
+          return Response.json({ error: 'Season name cannot be empty' }, { status: 400 });
+        }
+        await sql`UPDATE seasons SET name = ${trimmed} WHERE id = ${season.id}`;
+      }
       if (charity_seed !== undefined) {
         await sql`UPDATE seasons SET charity_seed = ${parseFloat(charity_seed)} WHERE id = ${season.id}`;
       }
